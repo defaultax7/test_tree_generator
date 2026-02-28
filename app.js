@@ -18,7 +18,7 @@ const state = {
   selectedId:     null,
   expandedIds:    new Set(),
   activeFilters:  {},
-  viewMode:       'list',   // 'list' | 'diagram'
+  viewMode:       'diagram', // 'list' | 'diagram'
 };
 
 /* ── 3. Tree builder ──────────────────────────────────────────────── */
@@ -629,6 +629,7 @@ function init() {
   renderFullTree();
   buildDiagram();
   updateSummary();
+  setViewMode('diagram');
 
   /* ── Event: tree interactions ───────────────────────────────────── */
   el('tree-root').addEventListener('click', e => {
