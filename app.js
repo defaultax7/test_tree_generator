@@ -654,6 +654,10 @@ function openDimModal() {
       card.innerHTML = `
         <div class="dim-card-header">
           <input class="dim-name-input" value="${dim.name}" placeholder="Dimension name" data-dim="${dimIdx}" />
+          <button class="btn btn-ghost btn-xs dim-move-up" data-dim="${dimIdx}" title="Move up"
+            ${dimIdx === 0 ? 'disabled' : ''}>▲</button>
+          <button class="btn btn-ghost btn-xs dim-move-down" data-dim="${dimIdx}" title="Move down"
+            ${dimIdx === draft.length - 1 ? 'disabled' : ''}>▼</button>
           <button class="btn btn-ghost btn-xs dim-remove-dim" data-dim="${dimIdx}" title="Remove dimension"
             ${draft.length <= 1 ? 'disabled' : ''}>✕</button>
         </div>
@@ -692,6 +696,18 @@ function openDimModal() {
   });
 
   backdrop.addEventListener('click', e => {
+    if (e.target.classList.contains('dim-move-up')) {
+      const i = +e.target.dataset.dim;
+      if (i <= 0) return;
+      [draft[i - 1], draft[i]] = [draft[i], draft[i - 1]];
+      renderBody(); return;
+    }
+    if (e.target.classList.contains('dim-move-down')) {
+      const i = +e.target.dataset.dim;
+      if (i >= draft.length - 1) return;
+      [draft[i], draft[i + 1]] = [draft[i + 1], draft[i]];
+      renderBody(); return;
+    }
     if (e.target.classList.contains('dim-val-remove')) {
       const i = +e.target.dataset.dim, vi = +e.target.dataset.val;
       if (draft[i].values.length <= 1) return;
