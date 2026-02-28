@@ -608,7 +608,77 @@ function openDimModal() {
   });
 }
 
-/* ── 19. Init ─────────────────────────────────────────────────────── */
+/* ── 19. Excel export ──────────────────────────────────────────────── */
+function exportExcel() {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert('SheetJS not loaded.'); return; }
+
+  /* ── Sheet 1: List ─────────────────────────────────────────────── */
+  const listHeaders = [...state.dimensions.map(d => d.name), 'Status', 'Remark'];
+  const listRows = [listHeaders];
+  state.leaves.forEach(leaf => {
+    listRows.push([...leaf.path, leaf.status, leaf.remark]);
+  });
+  const ws1 = XLSX.utils.aoa_to_sheet(listRows);
+  ws1['!cols'] = [
+    ...state.dimensions.map(() => ({ wch: 14 })),
+    { wch: 10 },
+    { wch: 36 },
+  ];
+
+  /* ── Sheet 2: Top-down tree diagram ───────────────────────────── */
+  /* Assign each leaf a sequential column; internal nodes span their
+     leftmost–rightmost leaf columns (merged in Excel).              */
+  let leafIdx = 0;
+  function assignCols(node) {
+    if (node.isLeaf) {
+      node._c = leafIdx++; node._cEnd = node._c;
+    } else {
+      node.children.forEach(assignCols);
+      node._c    = node.children[0]._c;
+      node._cEnd = node.children[node.children.length - 1]._cEnd;
+    }
+  }
+  assignCols(state.tree);
+
+  const numCols   = leafIdx;
+  const numLevels = state.dimensions.length;
+  /* rows: one per dimension level + one remark row at the bottom */
+  const numRows   = numLevels + 1;
+
+  const grid   = Array.from({ length: numRows }, () => Array(numCols).fill(null));
+  const merges = [];
+
+  function fillGrid(node) {
+    if (node.id === '__root__') { node.children.forEach(fillGrid); return; }
+    const row    = node.depth - 1;   /* depth 1 → row 0, depth 2 → row 1, … */
+    const status = node.isLeaf ? node.status : aggregateStatus(node);
+    grid[row][node._c] = `${node.label} (${status})`;
+    /* merge across all leaf columns this node covers */
+    if (node._cEnd > node._c) {
+      merges.push({ s: { r: row, c: node._c }, e: { r: row, c: node._cEnd } });
+    }
+    /* remarks live in the final row at the leaf's column */
+    if (node.isLeaf && node.remark) {
+      grid[numLevels][node._c] = node.remark;
+    }
+    if (!node.isLeaf) node.children.forEach(fillGrid);
+  }
+  fillGrid(state.tree);
+
+  const ws2 = XLSX.utils.aoa_to_sheet(grid);
+  ws2['!merges'] = merges;
+  ws2['!cols']   = Array.from({ length: numCols },   () => ({ wch: 16 }));
+  ws2['!rows']   = Array.from({ length: numRows }, () => ({ hpt: 28 }));
+
+  /* ── Build workbook ───────────────────────────────────────────── */
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws1, 'List');
+  XLSX.utils.book_append_sheet(wb, ws2, 'Tree');
+  XLSX.writeFile(wb, 'test-combinations.xlsx');
+}
+
+/* ── 20. Init ─────────────────────────────────────────────────────── */
 function init() {
   /* build data */
   const { root, nodes, leaves } = buildTree();
@@ -683,6 +753,7 @@ function init() {
   el('btn-view-list').addEventListener('click',    () => setViewMode('list'));
   el('btn-view-diagram').addEventListener('click', () => setViewMode('diagram'));
   el('btn-edit-dims').addEventListener('click', openDimModal);
+  el('btn-export').addEventListener('click', exportExcel);
 
   /* ── Diagram interactions ────────────────────────────────────────── */
   el('tree-diagram').addEventListener('click', e => {
