@@ -217,6 +217,12 @@ function updateDetail(id) {
       <div class="meta-card-value">${m.val}</div>
     </div>`)
     .join('');
+
+  /* action button states — disable the button matching the current status */
+  el('btn-mark-pass').disabled  = node.status === 'pass';
+  el('btn-mark-fail').disabled  = node.status === 'fail';
+  el('btn-mark-skip').disabled  = node.status === 'skipped';
+  el('btn-mark-reset').disabled = node.status === 'idle';
 }
 
 function showDetail(id) {
@@ -303,11 +309,11 @@ function hideCtxMenu() {
 }
 
 /* ── 14. Node actions ─────────────────────────────────────────────── */
-function skipNode(id) {
+function markNode(id, status) {
   const node = state.nodes[id];
   if (!node) return;
   getLeaves(node).forEach(l => {
-    l.status = 'skipped';
+    l.status = status;
     renderNode(l.id);
     renderAncestors(l);
   });
@@ -315,17 +321,8 @@ function skipNode(id) {
   updateSummary();
 }
 
-function resetNode(id) {
-  const node = state.nodes[id];
-  if (!node) return;
-  getLeaves(node).forEach(l => {
-    l.status = 'idle';
-    renderNode(l.id);
-    renderAncestors(l);
-  });
-  updateDetail(id);
-  updateSummary();
-}
+function skipNode(id)  { markNode(id, 'skipped'); }
+function resetNode(id) { markNode(id, 'idle'); }
 
 /* ── 15. Expand / collapse ────────────────────────────────────────── */
 function setExpanded(id, expanded) {
@@ -403,8 +400,10 @@ function init() {
     if (!action || !ctxTargetId) return;
     const id = ctxTargetId;
     hideCtxMenu();
-    if (action === 'skip')  skipNode(id);
-    if (action === 'reset') resetNode(id);
+    if (action === 'pass')  markNode(id, 'pass');
+    if (action === 'fail')  markNode(id, 'fail');
+    if (action === 'skip')  markNode(id, 'skipped');
+    if (action === 'reset') markNode(id, 'idle');
   });
 
   document.addEventListener('click', e => {
@@ -414,6 +413,12 @@ function init() {
   /* ── Toolbar buttons ─────────────────────────────────────────────── */
   el('btn-expand-all').addEventListener('click', expandAll);
   el('btn-collapse-all').addEventListener('click', collapseAll);
+
+  /* ── Detail panel mark buttons ───────────────────────────────────── */
+  el('btn-mark-pass').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'pass'); });
+  el('btn-mark-fail').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'fail'); });
+  el('btn-mark-skip').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'skipped'); });
+  el('btn-mark-reset').addEventListener('click', () => { if (state.selectedId) markNode(state.selectedId, 'idle'); });
 }
 
 /* ── Boot ─────────────────────────────────────────────────────────── */

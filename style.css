@@ -146,6 +146,19 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-xs { padding: 2px 7px; font-size: 11px; }
 
+.btn-mark-pass  { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.btn-mark-pass:not(:disabled):hover  { background: #a7f3d0; }
+
+.btn-mark-fail  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.btn-mark-fail:not(:disabled):hover  { background: #fecaca; }
+
+.btn-mark-skip  { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+.btn-mark-skip:not(:disabled):hover  { background: #fde68a; }
+
+.btn-mark-pass:disabled,
+.btn-mark-fail:disabled,
+.btn-mark-skip:disabled { opacity: .4; cursor: not-allowed; }
+
 /* ── Filter bar ────────────────────────────────────────────────────── */
 .filter-bar {
   background: var(--bg-filter);

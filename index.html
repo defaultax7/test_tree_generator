@@ -47,6 +47,12 @@
             <span class="status-badge" id="detail-status-badge"></span>
           </div>
           <div class="detail-meta" id="detail-meta"></div>
+          <div class="detail-actions">
+            <button id="btn-mark-pass"  class="btn btn-mark-pass  btn-sm">✓ Pass</button>
+            <button id="btn-mark-fail"  class="btn btn-mark-fail  btn-sm">✗ Fail</button>
+            <button id="btn-mark-skip"  class="btn btn-mark-skip  btn-sm">⊘ Skip</button>
+            <button id="btn-mark-reset" class="btn btn-ghost      btn-sm">↺ Reset</button>
+          </div>
         </div>
       </section>
 
@@ -69,6 +75,8 @@
 
   <!-- Context menu -->
   <ul class="ctx-menu" id="ctx-menu" hidden>
+    <li data-action="pass">✓ Mark Pass</li>
+    <li data-action="fail">✗ Mark Fail</li>
     <li data-action="skip">⊘ Skip</li>
     <li data-action="reset">↺ Reset</li>
   </ul>
