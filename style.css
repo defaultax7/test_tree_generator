@@ -14,7 +14,7 @@
   --text-muted:  #64748b;
   --text-inv:    #f8fafc;
 
-  --c-idle:     #94a3b8;
+  --c-untested: #94a3b8;
   --c-running:  #3b82f6;
   --c-pass:     #10b981;
   --c-fail:     #ef4444;
@@ -295,7 +295,7 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
   transition: background .3s;
 }
 
-.status-dot.idle    { background: var(--c-idle); }
+.status-dot.untested    { background: var(--c-untested); }
 .status-dot.running { background: var(--c-running); animation: pulse 1s infinite; }
 .status-dot.pass    { background: var(--c-pass); }
 .status-dot.fail    { background: var(--c-fail); }
@@ -393,7 +393,7 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
   letter-spacing: .5px;
 }
 
-.status-badge.idle    { background: #f1f5f9; color: var(--text-muted); }
+.status-badge.untested    { background: #f1f5f9; color: var(--text-muted); }
 .status-badge.running { background: #dbeafe; color: #1e40af; }
 .status-badge.pass    { background: #d1fae5; color: #065f46; }
 .status-badge.fail    { background: #fee2e2; color: #991b1b; }
@@ -748,7 +748,7 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
 
 /* ── Leaf node box: thick left border indicates status ─────────────── */
 .td-box.td-leaf  { border-left-width: 4px; }
-.td-box.td-leaf.idle    { border-left-color: var(--c-idle); }
+.td-box.td-leaf.untested    { border-left-color: var(--c-untested); }
 .td-box.td-leaf.pass    { border-left-color: var(--c-pass); }
 .td-box.td-leaf.fail    { border-left-color: var(--c-fail); }
 .td-box.td-leaf.skipped { border-left-color: var(--c-skipped); }

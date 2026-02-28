@@ -34,7 +34,7 @@ function buildTree() {
         label:    path[path.length - 1],
         children: [],
         isLeaf:   true,
-        status:   'idle',
+        status:   'untested',
         remark:   '',
       };
       nodes[id] = node;
@@ -48,7 +48,7 @@ function buildTree() {
       label:    path.length ? path[path.length - 1] : 'root',
       children: dim.values.map(v => recurse(depth + 1, [...path, v])),
       isLeaf:   false,
-      status:   'idle',
+      status:   'untested',
     };
     nodes[id] = node;
     return node;
@@ -67,7 +67,7 @@ function getLeaves(node) {
 function aggregateStatus(node) {
   if (node.isLeaf) return node.status;
   const statuses = getLeaves(node).map(l => l.status);
-  if (statuses.every(s => s === 'idle'))    return 'idle';
+  if (statuses.every(s => s === 'untested'))    return 'untested';
   if (statuses.every(s => s === 'pass'))    return 'pass';
   if (statuses.every(s => s === 'skipped')) return 'skipped';
   if (statuses.every(s => s === 'fail'))    return 'fail';
@@ -77,7 +77,7 @@ function aggregateStatus(node) {
 }
 
 function summaryCounts() {
-  const counts = { total: state.leaves.length, idle: 0, pass: 0, fail: 0, skipped: 0 };
+  const counts = { total: state.leaves.length, untested: 0, pass: 0, fail: 0, skipped: 0 };
   state.leaves.forEach(l => { counts[l.status] = (counts[l.status] || 0) + 1; });
   return counts;
 }
@@ -206,7 +206,7 @@ function buildNodeEl(node) {
     <div class="tree-row" data-node-id="${node.id}" data-leaf="${node.isLeaf}">
       <span class="tree-indent">${indentHTML}</span>
       <span class="tree-toggle ${node.isLeaf ? 'leaf' : ''}" data-toggle="${node.id}">${arrow}</span>
-      <span class="status-dot idle"></span>
+      <span class="status-dot untested"></span>
       <span class="tree-label ${node.isLeaf ? 'leaf' : 'internal'}">${node.label}</span>
       ${badgePart}
     </div>`;
@@ -319,7 +319,7 @@ function updateDetail(id) {
   el('btn-mark-pass').disabled  = node.status === 'pass';
   el('btn-mark-fail').disabled  = node.status === 'fail';
   el('btn-mark-skip').disabled  = node.status === 'skipped';
-  el('btn-mark-reset').disabled = node.status === 'idle';
+  el('btn-mark-reset').disabled = node.status === 'untested';
 
   /* remark */
   el('remark-input').value = node.remark;
@@ -352,7 +352,7 @@ function updateSummary() {
     { key: 'pass',    label: 'pass',    color: 'var(--c-pass)' },
     { key: 'fail',    label: 'fail',    color: 'var(--c-fail)' },
     { key: 'skipped', label: 'skipped', color: 'var(--c-skipped)' },
-    { key: 'idle',    label: 'idle',    color: 'var(--c-idle)' },
+    { key: 'untested',    label: 'untested',    color: 'var(--c-untested)' },
   ];
 
   el('summary-counts').innerHTML = countDefs
@@ -429,7 +429,7 @@ function markNode(id, status) {
 }
 
 function skipNode(id)  { markNode(id, 'skipped'); }
-function resetNode(id) { markNode(id, 'idle'); }
+function resetNode(id) { markNode(id, 'untested'); }
 
 /* ── 15. Expand / collapse ────────────────────────────────────────── */
 function setExpanded(id, expanded) {
@@ -611,7 +611,22 @@ function openDimModal() {
 /* ── 19. Excel export ──────────────────────────────────────────────── */
 function exportExcel() {
   const XLSX = window.XLSX;
-  if (!XLSX) { alert('SheetJS not loaded.'); return; }
+  if (!XLSX) { alert('xlsx-js-style not loaded.'); return; }
+
+  /* ── Status cell styles ───────────────────────────────────────── */
+  const statusStyle = {
+    pass:     { fill: { patternType: 'solid', fgColor: { rgb: 'C6EFCE' } }, font: { color: { rgb: '006100' }, bold: true } },
+    fail:     { fill: { patternType: 'solid', fgColor: { rgb: 'FFC7CE' } }, font: { color: { rgb: '9C0006' }, bold: true } },
+    untested: { fill: { patternType: 'solid', fgColor: { rgb: 'FFEB9C' } }, font: { color: { rgb: '9C5700' } } },
+    skipped:  { fill: { patternType: 'solid', fgColor: { rgb: 'FFD966' } }, font: { color: { rgb: '7F6000' } } },
+  };
+
+  /* Convert 0-based column index to Excel letter (A, B, …, Z, AA, …) */
+  function colLetter(c) {
+    let s = ''; c++;
+    while (c > 0) { s = String.fromCharCode(((c - 1) % 26) + 65) + s; c = Math.floor((c - 1) / 26); }
+    return s;
+  }
 
   /* ── Sheet 1: List ─────────────────────────────────────────────── */
   const listHeaders = [...state.dimensions.map(d => d.name), 'Status', 'Remark'];
@@ -622,9 +637,17 @@ function exportExcel() {
   const ws1 = XLSX.utils.aoa_to_sheet(listRows);
   ws1['!cols'] = [
     ...state.dimensions.map(() => ({ wch: 14 })),
-    { wch: 10 },
+    { wch: 12 },
     { wch: 36 },
   ];
+
+  /* Color the Status column (index = dimensions.length) for each data row */
+  const statusCol = colLetter(state.dimensions.length);
+  state.leaves.forEach((leaf, i) => {
+    const addr = `${statusCol}${i + 2}`; /* row 1 = header, data starts at row 2 */
+    const cell = ws1[addr];
+    if (cell && statusStyle[leaf.status]) cell.s = statusStyle[leaf.status];
+  });
 
   /* ── Sheet 2: Top-down tree diagram ───────────────────────────── */
   /* Assign each leaf a sequential column; internal nodes span their
@@ -646,8 +669,9 @@ function exportExcel() {
   /* rows: one per dimension level + one remark row at the bottom */
   const numRows   = numLevels + 1;
 
-  const grid   = Array.from({ length: numRows }, () => Array(numCols).fill(null));
-  const merges = [];
+  const grid      = Array.from({ length: numRows }, () => Array(numCols).fill(null));
+  const merges    = [];
+  const leafCells = []; /* track { row, col, status } for coloring */
 
   function fillGrid(node) {
     if (node.id === '__root__') { node.children.forEach(fillGrid); return; }
@@ -658,9 +682,10 @@ function exportExcel() {
     if (node._cEnd > node._c) {
       merges.push({ s: { r: row, c: node._c }, e: { r: row, c: node._cEnd } });
     }
-    /* remarks live in the final row at the leaf's column */
-    if (node.isLeaf && node.remark) {
-      grid[numLevels][node._c] = node.remark;
+    if (node.isLeaf) {
+      leafCells.push({ row, col: node._c, status: node.status });
+      /* remarks live in the final row at the leaf's column */
+      if (node.remark) grid[numLevels][node._c] = node.remark;
     }
     if (!node.isLeaf) node.children.forEach(fillGrid);
   }
@@ -668,8 +693,15 @@ function exportExcel() {
 
   const ws2 = XLSX.utils.aoa_to_sheet(grid);
   ws2['!merges'] = merges;
-  ws2['!cols']   = Array.from({ length: numCols },   () => ({ wch: 16 }));
+  ws2['!cols']   = Array.from({ length: numCols }, () => ({ wch: 16 }));
   ws2['!rows']   = Array.from({ length: numRows }, () => ({ hpt: 28 }));
+
+  /* Color leaf cells in Tree sheet */
+  leafCells.forEach(({ row, col, status }) => {
+    const addr = `${colLetter(col)}${row + 1}`; /* 1-indexed row */
+    const cell = ws2[addr];
+    if (cell && statusStyle[status]) cell.s = statusStyle[status];
+  });
 
   /* ── Build workbook ───────────────────────────────────────────── */
   const wb = XLSX.utils.book_new();
@@ -740,7 +772,7 @@ function init() {
     if (action === 'pass')  markNode(id, 'pass');
     if (action === 'fail')  markNode(id, 'fail');
     if (action === 'skip')  markNode(id, 'skipped');
-    if (action === 'reset') markNode(id, 'idle');
+    if (action === 'reset') markNode(id, 'untested');
   });
 
   document.addEventListener('click', e => {
@@ -775,7 +807,7 @@ function init() {
   el('btn-mark-pass').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'pass'); });
   el('btn-mark-fail').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'fail'); });
   el('btn-mark-skip').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'skipped'); });
-  el('btn-mark-reset').addEventListener('click', () => { if (state.selectedId) markNode(state.selectedId, 'idle'); });
+  el('btn-mark-reset').addEventListener('click', () => { if (state.selectedId) markNode(state.selectedId, 'untested'); });
 
   /* ── Remark textarea ─────────────────────────────────────────────── */
   el('remark-input').addEventListener('input', e => {
