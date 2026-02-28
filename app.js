@@ -735,6 +735,11 @@ function openDimModal() {
         if (!d.name.trim()) { alert('Each dimension must have a name.'); return; }
         if (!d.values.length) { alert(`Dimension "${d.name}" must have at least one value.`); return; }
       }
+      /* warn if any leaf has recorded data */
+      const hasData = state.leaves.some(l =>
+        Object.values(l.results).some(v => v !== 'untested') || l.remark
+      );
+      if (hasData && !confirm('Changing dimensions will reset all test results and remarks. Continue?')) return;
       /* derive keys from names, ensuring uniqueness */
       const seen = {};
       state.dimensions = draft.map(d => {
@@ -839,6 +844,11 @@ function openResultDimModal() {
       for (const r of draft) {
         if (!r.name.trim()) { alert('Each result dimension must have a name.'); return; }
       }
+      /* warn if any leaf has recorded data */
+      const hasData = state.leaves.some(l =>
+        Object.values(l.results).some(v => v !== 'untested')
+      );
+      if (hasData && !confirm('Changing result dimensions may discard some recorded statuses. Continue?')) return;
       /* derive unique keys from names */
       const seen = {};
       state.resultDimensions = draft.map(r => {
