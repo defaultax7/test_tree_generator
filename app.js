@@ -2,15 +2,16 @@
    Test Combination Tree  — app.js
    ═══════════════════════════════════════════════════════════════════ */
 
-/* ── 1. Dimension config (edit here to add/remove dimensions) ─────── */
-const DIMENSIONS = [
-  { name: 'Testing Env',      key: 'env',      values: ['local', 'remote'] },
-  { name: 'Platform',         key: 'platform', values: ['native', 'docker', 'k8s'] },
-  { name: 'Action',           key: 'action',   values: ['get', 'post'] },
-];
+/* ── 1. Dimension config ──────────────────────────────────────────── */
+/* Stored in state.dimensions — edit via the toolbar "Edit Dims" modal */
 
 /* ── 2. State ─────────────────────────────────────────────────────── */
 const state = {
+  dimensions: [
+    { name: 'Testing Env',  key: 'env',      values: ['local', 'remote'] },
+    { name: 'Platform',     key: 'platform', values: ['native', 'docker', 'k8s'] },
+    { name: 'Action',       key: 'action',   values: ['get', 'post'] },
+  ],
   tree:           null,
   nodes:          {},
   leaves:         [],
@@ -26,7 +27,7 @@ function buildTree() {
   const leaves = [];
 
   function recurse(depth, path) {
-    if (depth === DIMENSIONS.length) {
+    if (depth === state.dimensions.length) {
       const id = path.join('.');
       const node = {
         id, path: [...path], depth,
@@ -40,7 +41,7 @@ function buildTree() {
       leaves.push(node);
       return node;
     }
-    const dim = DIMENSIONS[depth];
+    const dim = state.dimensions[depth];
     const id  = path.length ? path.join('.') : '__root__';
     const node = {
       id, path: [...path], depth,
@@ -99,7 +100,7 @@ function renderAncestors(leaf) {
 function isNodeVisible(node) {
   /* a leaf is visible if every dimension value in its path passes the filter */
   if (!node.isLeaf) return true;
-  return DIMENSIONS.every((dim, i) => {
+  return state.dimensions.every((dim, i) => {
     const val = node.path[i];
     return state.activeFilters[dim.key].has(val);
   });
@@ -305,7 +306,7 @@ function updateDetail(id) {
   badge.className   = `status-badge ${node.status}`;
 
   /* meta cards */
-  const metaData = DIMENSIONS.map((dim, i) => ({ label: dim.name, val: node.path[i] }));
+  const metaData = state.dimensions.map((dim, i) => ({ label: dim.name, val: node.path[i] }));
 
   el('detail-meta').innerHTML = metaData
     .map(m => `<div class="meta-card">
@@ -371,7 +372,7 @@ function updateSummary() {
 
 /* ── 12. Filter bar ───────────────────────────────────────────────── */
 function buildFilterBar() {
-  el('filter-bar').innerHTML = DIMENSIONS.map(dim => `
+  el('filter-bar').innerHTML = state.dimensions.map(dim => `
     <div class="filter-group">
       <span class="filter-label">${dim.name}:</span>
       ${dim.values.map(val => `
@@ -466,7 +467,148 @@ function setViewMode(mode) {
   el('btn-collapse-all').disabled = isDiagram;
 }
 
-/* ── 17. Init ─────────────────────────────────────────────────────── */
+/* ── 17. Rebuild (after dimension changes) ─────────────────────────── */
+function rebuildAll() {
+  const { root, nodes, leaves } = buildTree();
+  state.tree       = root;
+  state.nodes      = nodes;
+  state.leaves     = leaves;
+  state.selectedId = null;
+
+  /* reset filters — all values active */
+  state.activeFilters = {};
+  state.dimensions.forEach(dim => {
+    state.activeFilters[dim.key] = new Set(dim.values);
+  });
+
+  /* reset expanded — expand all */
+  state.expandedIds = new Set();
+  Object.values(nodes).filter(n => !n.isLeaf).forEach(n => state.expandedIds.add(n.id));
+
+  /* re-render */
+  buildFilterBar();
+  renderFullTree();
+  buildDiagram();
+  updateSummary();
+
+  /* reset detail panel */
+  el('detail-empty').hidden   = false;
+  el('detail-content').hidden = true;
+}
+
+/* ── 18. Dimension editor modal ────────────────────────────────────── */
+function openDimModal() {
+  /* work on a deep clone so Cancel discards changes */
+  let draft = state.dimensions.map(d => ({ name: d.name, key: d.key, values: [...d.values] }));
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'dim-backdrop';
+  backdrop.innerHTML = `
+    <div class="dim-modal" role="dialog" aria-modal="true" aria-label="Edit Dimensions">
+      <div class="dim-modal-header">
+        <span class="dim-modal-title">Edit Dimensions</span>
+        <button class="btn btn-ghost btn-xs dim-modal-close" title="Close">✕</button>
+      </div>
+      <div class="dim-modal-body" id="dim-modal-body"></div>
+      <div class="dim-modal-footer">
+        <button class="btn btn-ghost btn-sm" id="dim-btn-add-dim">+ Add Dimension</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-secondary btn-sm" id="dim-btn-cancel">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="dim-btn-apply">Apply</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  function renderBody() {
+    const body = backdrop.querySelector('#dim-modal-body');
+    body.innerHTML = '';
+    draft.forEach((dim, dimIdx) => {
+      const card = document.createElement('div');
+      card.className = 'dim-card';
+      card.innerHTML = `
+        <div class="dim-card-header">
+          <input class="dim-name-input" value="${dim.name}" placeholder="Dimension name" data-dim="${dimIdx}" />
+          <button class="btn btn-ghost btn-xs dim-remove-dim" data-dim="${dimIdx}" title="Remove dimension"
+            ${draft.length <= 1 ? 'disabled' : ''}>✕</button>
+        </div>
+        <div class="dim-values">
+          ${dim.values.map((v, vi) => `
+            <span class="dim-val-chip">${v}
+              <button class="dim-val-remove" data-dim="${dimIdx}" data-val="${vi}"
+                title="Remove value" ${dim.values.length <= 1 ? 'disabled' : ''}>✕</button>
+            </span>`).join('')}
+          <input class="dim-val-input" placeholder="Add value…" data-dim="${dimIdx}" />
+        </div>`;
+      body.appendChild(card);
+    });
+  }
+
+  renderBody();
+
+  /* ── event delegation inside modal ── */
+  backdrop.addEventListener('input', e => {
+    if (e.target.classList.contains('dim-name-input')) {
+      draft[+e.target.dataset.dim].name = e.target.value;
+    }
+  });
+
+  backdrop.addEventListener('keydown', e => {
+    if (e.target.classList.contains('dim-val-input') && e.key === 'Enter') {
+      const i   = +e.target.dataset.dim;
+      const val = e.target.value.trim();
+      if (!val) return;
+      if (draft[i].values.includes(val)) { e.target.select(); return; }
+      draft[i].values.push(val);
+      e.target.value = '';
+      renderBody();
+      backdrop.querySelector(`[data-dim="${i}"].dim-val-input`).focus();
+    }
+  });
+
+  backdrop.addEventListener('click', e => {
+    if (e.target.classList.contains('dim-val-remove')) {
+      const i = +e.target.dataset.dim, vi = +e.target.dataset.val;
+      if (draft[i].values.length <= 1) return;
+      draft[i].values.splice(vi, 1);
+      renderBody(); return;
+    }
+    if (e.target.classList.contains('dim-remove-dim')) {
+      const i = +e.target.dataset.dim;
+      if (draft.length <= 1) return;
+      draft.splice(i, 1);
+      renderBody(); return;
+    }
+    if (e.target.id === 'dim-btn-add-dim') {
+      draft.push({ name: 'New Dimension', key: '', values: ['value1'] });
+      renderBody();
+      const inputs = backdrop.querySelectorAll('.dim-name-input');
+      const last = inputs[inputs.length - 1];
+      last.focus(); last.select(); return;
+    }
+    if (e.target.id === 'dim-btn-cancel' || e.target.classList.contains('dim-modal-close')) {
+      backdrop.remove(); return;
+    }
+    if (e.target.id === 'dim-btn-apply') {
+      for (const d of draft) {
+        if (!d.name.trim()) { alert('Each dimension must have a name.'); return; }
+        if (!d.values.length) { alert(`Dimension "${d.name}" must have at least one value.`); return; }
+      }
+      /* derive keys from names, ensuring uniqueness */
+      const seen = {};
+      state.dimensions = draft.map(d => {
+        let key = d.name.trim().toLowerCase().replace(/\s+/g, '_');
+        if (seen[key] !== undefined) key += '_' + (++seen[key]);
+        else seen[key] = 0;
+        return { name: d.name.trim(), key, values: d.values };
+      });
+      backdrop.remove();
+      rebuildAll(); return;
+    }
+    if (e.target === backdrop) { backdrop.remove(); }
+  });
+}
+
+/* ── 19. Init ─────────────────────────────────────────────────────── */
 function init() {
   /* build data */
   const { root, nodes, leaves } = buildTree();
@@ -475,7 +617,7 @@ function init() {
   state.leaves = leaves;
 
   /* init filters — all values active */
-  DIMENSIONS.forEach(dim => {
+  state.dimensions.forEach(dim => {
     state.activeFilters[dim.key] = new Set(dim.values);
   });
 
@@ -539,6 +681,7 @@ function init() {
   el('btn-collapse-all').addEventListener('click', collapseAll);
   el('btn-view-list').addEventListener('click',    () => setViewMode('list'));
   el('btn-view-diagram').addEventListener('click', () => setViewMode('diagram'));
+  el('btn-edit-dims').addEventListener('click', openDimModal);
 
   /* ── Diagram interactions ────────────────────────────────────────── */
   el('tree-diagram').addEventListener('click', e => {
