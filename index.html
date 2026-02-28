@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Test Combination Tree</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Toolbar ─────────────────────────────────────────────────── -->
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <span class="app-icon">⬡</span>
+        <h1 class="app-title">Test Combination Tree</h1>
+      </div>
+
+      <div class="toolbar-actions">
+        <button id="btn-run-all"      class="btn btn-primary">▶ Run All</button>
+        <button id="btn-run-selected" class="btn btn-secondary" disabled>▶ Run Selected</button>
+        <button id="btn-stop"         class="btn btn-danger"   disabled>■ Stop</button>
+        <div class="sep"></div>
+        <button id="btn-reset"        class="btn btn-ghost">↺ Reset</button>
+        <div class="sep"></div>
+        <button id="btn-expand-all"   class="btn btn-ghost">⊞ Expand</button>
+        <button id="btn-collapse-all" class="btn btn-ghost">⊟ Collapse</button>
+        <div class="sep"></div>
+        <label class="concurrency-label">
+          Parallel:
+          <select id="sel-concurrency">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="4" selected>4</option>
+            <option value="8">8</option>
+            <option value="0">∞</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <!-- ── Filters ───────────────────────────────────────────────────── -->
+    <div class="filter-bar" id="filter-bar">
+      <!-- injected by JS -->
+    </div>
+
+    <!-- ── Main workspace ───────────────────────────────────────────── -->
+    <main class="workspace">
+
+      <!-- Tree panel -->
+      <aside class="tree-panel" id="tree-panel">
+        <div id="tree-root"></div>
+      </aside>
+
+      <!-- Detail panel -->
+      <section class="detail-panel" id="detail-panel">
+        <div class="detail-empty" id="detail-empty">
+          <div class="detail-empty-icon">◎</div>
+          <p>Select a leaf node to view details</p>
+        </div>
+        <div class="detail-content" id="detail-content" hidden>
+          <div class="detail-header">
+            <div class="detail-breadcrumb" id="detail-breadcrumb"></div>
+            <span class="status-badge" id="detail-status-badge"></span>
+          </div>
+          <div class="detail-meta" id="detail-meta"></div>
+          <div class="detail-actions">
+            <button id="btn-detail-run"  class="btn btn-primary btn-sm">▶ Run</button>
+            <button id="btn-detail-skip" class="btn btn-ghost  btn-sm">⊘ Skip</button>
+            <button id="btn-detail-reset"class="btn btn-ghost  btn-sm">↺ Reset</button>
+          </div>
+          <div class="log-box">
+            <div class="log-box-header">
+              <span>Output</span>
+              <button id="btn-clear-log" class="btn btn-ghost btn-xs">Clear</button>
+            </div>
+            <pre id="detail-log" class="log-output"></pre>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ── Summary bar ──────────────────────────────────────────────── -->
+    <footer class="summary-bar" id="summary-bar">
+      <div class="summary-counts" id="summary-counts"></div>
+      <div class="summary-progress-wrap">
+        <div class="summary-progress-bar" id="summary-progress-bar">
+          <div class="progress-fill pass"    id="prog-pass"></div>
+          <div class="progress-fill fail"    id="prog-fail"></div>
+          <div class="progress-fill running" id="prog-running"></div>
+          <div class="progress-fill skipped" id="prog-skipped"></div>
+        </div>
+        <span class="summary-pct" id="summary-pct">0%</span>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Context menu -->
+  <ul class="ctx-menu" id="ctx-menu" hidden>
+    <li data-action="run">▶ Run</li>
+    <li data-action="run-subtree">▶ Run Subtree</li>
+    <li class="ctx-sep"></li>
+    <li data-action="skip">⊘ Skip</li>
+    <li data-action="reset">↺ Reset</li>
+  </ul>
+
+  <script src="app.js"></script>
+</body>
+</html>
