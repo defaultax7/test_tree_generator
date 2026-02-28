@@ -2,241 +2,328 @@
 
 ## 1. Overview
 
-This document specifies requirements for a tool that generates and displays a hierarchical tree of all testing combinations derived from configurable dimensions (e.g., environment, platform, action). The UI renders this tree interactively, allowing users to explore, select, and execute test combinations.
+A client-side single-page tool that generates and displays a hierarchical tree of all testing combinations derived from user-configurable dimensions (e.g., environment, platform, action). Users navigate the tree, manually mark leaf nodes with a test result status, add remarks, and export results to Excel.
+
+No backend is required. All state is managed in-memory for the duration of the browser session.
 
 ---
 
 ## 2. Problem Statement
 
-When testing systems across multiple dimensions (e.g., environment, deployment platform, HTTP method), the number of combinations grows multiplicatively. Manually tracking and running each combination is error-prone. This tool provides a structured, visual representation of all combinations and enables targeted execution.
+When validating a system across multiple axes (e.g., deployment environment, platform, HTTP action), the number of required test cases grows multiplicatively. Manually tracking which combinations have been tested, which passed, and which failed is error-prone. This tool provides a structured visual representation of all combinations and a consistent workflow for recording results.
 
 ---
 
 ## 3. Scope
 
-- Accepts N dimensions, each with M possible values
-- Generates all combinations (cartesian product)
-- Renders combinations as an interactive tree in a UI
-- Supports selection and execution of individual nodes or subtrees
-- Reports pass/fail status per combination
+**In scope:**
+- Configurable N-dimensional cartesian product tree generation
+- Two interactive views: collapsible list and top-down diagram
+- Manual status marking per leaf node (or entire subtree)
+- Per-leaf text remarks
+- Per-dimension value filtering (applies to both views)
+- Excel export with two sheets and color-coded cells
 
-Out of scope: test content/logic, CI/CD integration (v1).
+**Out of scope:**
+- Test execution / automation (no run buttons)
+- CI/CD integration
+- Persistent storage (no save/load to disk or database)
+- User authentication
 
 ---
 
 ## 4. Dimensions
 
-Dimensions are user-configurable. The default set is:
+Dimensions are fully user-configurable at runtime via the Dimensions modal. The default set is:
 
-| Dimension         | Values                  | Tree Depth |
-|-------------------|-------------------------|------------|
-| Testing Env       | `local`, `remote`       | Level 1    |
-| Running Platform  | `native`, `docker`, `k8s` | Level 2  |
-| Action            | `get`, `post`           | Level 3    |
+| Dimension    | Key        | Values                      | Tree Depth |
+|--------------|------------|-----------------------------|------------|
+| Testing Env  | `env`      | `local`, `remote`           | Level 1    |
+| Platform     | `platform` | `native`, `docker`, `k8s`   | Level 2    |
+| Action       | `action`   | `get`, `post`               | Level 3    |
 
-**Total combinations:** 2 × 3 × 2 = **12 leaf nodes**
-
----
-
-## 5. Combination Tree Structure
-
-```
-root
-├── local
-│   ├── native
-│   │   ├── get
-│   │   └── post
-│   ├── docker
-│   │   ├── get
-│   │   └── post
-│   └── k8s
-│       ├── get
-│       └── post
-└── remote
-    ├── native
-    │   ├── get
-    │   └── post
-    ├── docker
-    │   ├── get
-    │   └── post
-    └── k8s
-        ├── get
-        └── post
-```
-
-Each **leaf node** represents one fully-qualified test combination, e.g.:
-- `local > native > get`
-- `remote > k8s > post`
-
-Each **internal node** represents a partial combination (a group of tests).
+**Default total combinations:** 2 × 3 × 2 = **12 leaf nodes**
 
 ---
 
-## 6. Data Model
+## 5. Data Model
 
-### 6.1 Dimension Config
+### 5.1 Dimension
 
-```ts
-interface Dimension {
-  name: string;       // e.g. "Testing Env"
-  key: string;        // e.g. "env"
-  values: string[];   // e.g. ["local", "remote"]
+```
+{
+  name:   string    // display name, e.g. "Testing Env"
+  key:    string    // derived from name; used as filter key, e.g. "testing_env"
+  values: string[]  // e.g. ["local", "remote"]
 }
 ```
 
-### 6.2 Tree Node
+Keys are auto-derived on Apply: `name.toLowerCase().replace(/\s+/g, '_')`, with a numeric suffix appended to ensure uniqueness across dimensions.
 
-```ts
-interface TreeNode {
-  id: string;           // e.g. "local.native.get"
-  label: string;        // e.g. "get"
-  path: string[];       // e.g. ["local", "native", "get"]
-  depth: number;        // 0 = root, 1..N = dimension levels
-  children: TreeNode[];
-  isLeaf: boolean;
-  status: "idle" | "running" | "pass" | "fail" | "skipped";
+### 5.2 Tree Node
+
+```
+{
+  id:       string      // dot-joined path, e.g. "local.native.get"; root = "__root__"
+  label:    string      // last path segment, e.g. "get"
+  path:     string[]    // full path from root, e.g. ["local", "native", "get"]
+  depth:    number      // 0 = root, 1..N = dimension levels
+  children: TreeNode[]  // empty for leaves
+  isLeaf:   boolean
+  status:   "untested" | "running" | "pass" | "fail" | "skipped"
+  remark:   string      // leaf only; free-text note; defaults to ""
 }
 ```
 
-### 6.3 Combination Record (leaf only)
+### 5.3 Aggregate Status (internal nodes)
 
-```ts
-interface Combination {
-  id: string;
-  env: string;          // "local" | "remote"
-  platform: string;     // "native" | "docker" | "k8s"
-  action: string;       // "get" | "post"
-  status: CombinationStatus;
-  startedAt?: Date;
-  finishedAt?: Date;
-  logs?: string;
+Internal node status is computed on demand from descendant leaves:
+
+| Leaf statuses                    | Aggregate      |
+|----------------------------------|----------------|
+| All `untested`                   | `untested`     |
+| All `pass`                       | `pass`         |
+| All `fail`                       | `fail`         |
+| All `skipped`                    | `skipped`      |
+| Any `running`                    | `running`      |
+| Any `fail` (mixed)               | `fail`         |
+| Mixed (no fail, not all same)    | `partial`      |
+
+### 5.4 Application State
+
+```
+{
+  dimensions:    Dimension[]
+  tree:          TreeNode          // root node
+  nodes:         { [id]: TreeNode } // flat lookup map
+  leaves:        TreeNode[]        // ordered list of all leaf nodes
+  selectedId:    string | null     // currently selected leaf id
+  expandedIds:   Set<string>       // ids of expanded internal nodes (list view)
+  activeFilters: { [dimKey]: Set<string> } // active values per dimension
+  viewMode:      "list" | "diagram"
 }
 ```
 
 ---
 
-## 7. UI Requirements
+## 6. Tree Generation
 
-### 7.1 Tree Panel
-
-| Requirement | Description |
-|---|---|
-| TR-01 | Render the full combination tree in an expandable/collapsible tree view |
-| TR-02 | All nodes expanded by default |
-| TR-03 | Internal nodes show child count badge (e.g., `native (2)`) |
-| TR-04 | Leaf nodes display status indicator: idle / running / pass / fail / skipped |
-| TR-05 | Internal nodes show aggregate status: pass if all children pass, fail if any child fails, partial otherwise |
-| TR-06 | Clicking a leaf node selects it and shows details in the Detail Panel |
-| TR-07 | Right-click context menu on any node: **Run**, **Run Subtree**, **Skip**, **Reset** |
-
-### 7.2 Toolbar
-
-| Requirement | Description |
-|---|---|
-| TB-01 | **Run All** button — runs all 12 combinations sequentially or in parallel (configurable) |
-| TB-02 | **Run Selected** button — runs only checked/selected nodes |
-| TB-03 | **Reset All** button — resets all statuses to idle |
-| TB-04 | Filter chips per dimension value (e.g., toggle `local` off to hide its subtree) |
-| TB-05 | **Expand All / Collapse All** toggle |
-
-### 7.3 Detail Panel (right-side drawer or bottom panel)
-
-| Requirement | Description |
-|---|---|
-| DP-01 | Shows full combination path for the selected leaf |
-| DP-02 | Shows status, start time, duration |
-| DP-03 | Shows log output (scrollable, monospace) |
-| DP-04 | Shows **Re-run** and **Skip** action buttons |
-
-### 7.4 Summary Bar
-
-| Requirement | Description |
-|---|---|
-| SB-01 | Displays total counts: Total / Pass / Fail / Running / Skipped / Idle |
-| SB-02 | Displays a progress bar (pass + fail / total) |
-| SB-03 | Updates in real time as tests run |
-
----
-
-## 8. Functional Requirements
-
-| ID | Requirement |
-|---|---|
-| FR-01 | The tree is generated programmatically from the dimension config array (cartesian product) |
-| FR-02 | Adding or removing a dimension value regenerates the tree without manual changes |
-| FR-03 | The system must support at minimum N=5 dimensions and M=10 values per dimension |
-| FR-04 | Each leaf node maps to a runnable test unit (stub, script, or API call) |
-| FR-05 | Running a parent node runs all descendant leaf nodes |
-| FR-06 | Parallel execution limit is configurable (default: 4 concurrent) |
-| FR-07 | State is persisted in memory per session; optional export to JSON |
-| FR-08 | Tree re-renders without full page reload when dimension config changes |
-
----
-
-## 9. Non-Functional Requirements
-
-| ID | Requirement |
-|---|---|
-| NFR-01 | Tree renders within 200ms for up to 500 leaf nodes |
-| NFR-02 | UI is responsive and usable at 1280×800 minimum resolution |
-| NFR-03 | Accessible: keyboard navigable tree, ARIA labels on status indicators |
-| NFR-04 | No external backend required for v1 (client-side only) |
-
----
-
-## 10. Tree Generation Algorithm
+The tree is built by recursive cartesian product over `state.dimensions`:
 
 ```
-function buildTree(dimensions: Dimension[]): TreeNode {
-  function recurse(depth, pathSoFar): TreeNode[] {
-    if depth == dimensions.length:
-      return [leaf node with id = pathSoFar.join(".")]
+recurse(depth, path):
+  if depth == dimensions.length:
+    return leaf node { id: path.join("."), status: "untested", remark: "" }
 
-    return dimensions[depth].values.map(value => {
-      children = recurse(depth + 1, [...pathSoFar, value])
-      return internal node { label: value, children, depth }
-    })
+  dim = dimensions[depth]
+  return internal node {
+    id:       path.length ? path.join(".") : "__root__",
+    children: dim.values.map(v => recurse(depth+1, [...path, v]))
   }
-
-  return { label: "root", depth: 0, children: recurse(0, []) }
-}
 ```
+
+The result is a flat node map (`state.nodes`) and a flat leaves array (`state.leaves`) maintained alongside the root for O(1) lookup.
 
 ---
 
-## 11. Example Rendered Tree (with statuses)
+## 7. Views
 
-```
-root                          [partial: 8/12 pass]
-├── local                     [partial: 5/6 pass]
-│   ├── native                [pass: 2/2]
-│   │   ├── get               [PASS]
-│   │   └── post              [PASS]
-│   ├── docker                [partial: 1/2]
-│   │   ├── get               [PASS]
-│   │   └── post              [FAIL]
-│   └── k8s                   [pass: 2/2]
-│       ├── get               [PASS]
-│       └── post              [PASS]
-└── remote                    [partial: 3/6 pass]
-    ├── native                [pass: 2/2]
-    │   ├── get               [PASS]
-    │   └── post              [PASS]
-    ├── docker                [fail: 0/2]
-    │   ├── get               [FAIL]
-    │   └── post              [FAIL]
-    └── k8s                   [idle]
-        ├── get               [IDLE]
-        └── post              [IDLE]
-```
+### 7.1 List View
+
+An expandable/collapsible indented tree rendered as DOM nodes.
+
+| ID    | Requirement |
+|-------|-------------|
+| LV-01 | All internal nodes expanded by default |
+| LV-02 | Click an internal node row or its toggle arrow to expand/collapse |
+| LV-03 | Click a leaf node to select it and open the Detail Panel |
+| LV-04 | Each row shows: indent guides, toggle arrow, status dot, label, badge |
+| LV-05 | Internal nodes show a badge: `{fail}✗ {pass}✓` if any fail, else `{pass}/{total}` |
+| LV-06 | Toolbar **Expand All** / **Collapse All** buttons apply to list view only |
+| LV-07 | Right-click any row to open the context menu |
+| LV-08 | Filter chips hide/show nodes; an internal node is hidden if all its leaves are filtered |
+
+### 7.2 Diagram View (default)
+
+A top-down tree rendered with pure CSS (`ul`/`li` flex layout and `::before`/`::after` connector lines). No SVG.
+
+| ID    | Requirement |
+|-------|-------------|
+| DV-01 | **Default view on load** |
+| DV-02 | Each node rendered as a box (`.td-box`) showing status dot, label, and badge |
+| DV-03 | Leaf boxes have a colour-coded 4px left border per status |
+| DV-04 | Internal boxes have a tinted background per status |
+| DV-05 | Click a leaf box to select it and open the Detail Panel |
+| DV-06 | Right-click any box to open the context menu |
+| DV-07 | Leaf boxes show a blue indicator dot when a remark is present |
+| DV-08 | Filter chips hide/show `li` elements; an internal `li` is hidden if all its leaf descendants are filtered |
+| DV-09 | Connector lines are drawn with CSS pseudo-elements; outermost nodes suppress their outer shoulder half |
+
+### 7.3 View Toggle
+
+Toolbar buttons switch between List and Diagram. Expand / Collapse buttons are disabled in Diagram mode. Switching views preserves all data state (statuses, selections, filter state).
 
 ---
 
-## 12. Open Questions
+## 8. Status System
 
-| # | Question | Owner |
-|---|---|---|
-| Q1 | Should the tree order (which dimension is depth-1 vs depth-N) be user-configurable via drag-and-drop? | Product |
-| Q2 | Should failed combinations auto-retry with a configurable retry count? | Product |
-| Q3 | Is JSON export sufficient or is CSV/HTML report also needed? | Product |
-| Q4 | Should dimension values support icons/colors for better visual grouping? | Design |
+### 8.1 Status Values
+
+| Status     | Meaning                                    | Colour token     |
+|------------|--------------------------------------------|------------------|
+| `untested` | Default; not yet assessed                  | `--c-untested`   |
+| `pass`     | Test passed                                | `--c-pass`       |
+| `fail`     | Test failed                                | `--c-fail`       |
+| `skipped`  | Deliberately skipped                       | `--c-skipped`    |
+| `running`  | In progress (reserved; not set by UI)      | `--c-running`    |
+| `partial`  | Internal only; mixed descendant statuses   | `--c-partial`    |
+
+### 8.2 Marking
+
+Status can be changed via:
+- **Detail Panel** action buttons (Pass / Fail / Skip / Reset) — applies to the selected leaf only
+- **Context menu** (right-click on any node) — applies to all leaf descendants of the target node
+- The Reset action restores status to `untested`
+
+After any status change, the affected node's row/box and all its ancestors are re-rendered in place (no full rebuild).
+
+---
+
+## 9. Detail Panel
+
+Appears on the right side of the workspace when a leaf node is selected.
+
+| ID    | Requirement |
+|-------|-------------|
+| DP-01 | Shows breadcrumb path: `seg1 › seg2 › seg3` |
+| DP-02 | Shows status badge (styled per status) |
+| DP-03 | Shows meta cards — one per dimension, showing the dimension name and the node's value for that dimension |
+| DP-04 | Action buttons: **✓ Pass**, **✗ Fail**, **⊘ Skip**, **↺ Reset** — the button matching the current status is disabled |
+| DP-05 | Remark textarea — changes are reflected immediately in the diagram indicator dot |
+| DP-06 | When no node is selected, shows an empty-state placeholder |
+
+---
+
+## 10. Filter Bar
+
+Located below the toolbar. One group of chips per dimension; each chip represents one dimension value.
+
+| ID    | Requirement |
+|-------|-------------|
+| FB-01 | All chips active by default |
+| FB-02 | Clicking an active chip deactivates it (removes value from filter set) |
+| FB-03 | Clicking an inactive chip reactivates it |
+| FB-04 | A chip cannot be deactivated if it is the last active chip in its group (minimum 1 per dimension) |
+| FB-05 | Filter changes apply immediately to both List and Diagram views |
+| FB-06 | Filter bar resets to all-active when dimensions are rebuilt |
+
+---
+
+## 11. Context Menu
+
+Right-click on any node in either view.
+
+| Action    | Effect |
+|-----------|--------|
+| ✓ Mark Pass | Sets all descendant leaves to `pass` |
+| ✗ Mark Fail | Sets all descendant leaves to `fail` |
+| ⊘ Skip      | Sets all descendant leaves to `skipped` |
+| ↺ Reset     | Sets all descendant leaves to `untested` |
+
+The menu closes on action selection or on any click outside it.
+
+---
+
+## 12. Summary Bar
+
+Fixed footer bar, always visible.
+
+| ID    | Requirement |
+|-------|-------------|
+| SB-01 | Displays count chips: Total, Pass, Fail, Skipped, Untested — each with a colour dot |
+| SB-02 | Displays a segmented progress bar: Pass (green) / Fail (red) / Skipped (yellow) segments |
+| SB-03 | Displays overall completion percentage: `(pass + fail + skipped) / total × 100%` |
+| SB-04 | Updates immediately after any status change |
+
+---
+
+## 13. Dimension Editor Modal
+
+Opened via the **⚙ Dimensions** toolbar button.
+
+| ID    | Requirement |
+|-------|-------------|
+| DE-01 | Opens a modal over a dark backdrop; Escape / backdrop click / ✕ closes without saving |
+| DE-02 | Edits a deep clone of `state.dimensions`; Cancel discards all changes |
+| DE-03 | Each dimension card has an editable name field and a row of value chips |
+| DE-04 | Press Enter in the value input to add a value; duplicate values are rejected silently |
+| DE-05 | Each value chip has a ✕ button; disabled when only 1 value remains |
+| DE-06 | Each dimension card has a ✕ button to remove it; disabled when only 1 dimension remains |
+| DE-07 | **+ Add Dimension** button appends a new card and focuses its name input |
+| DE-08 | **Apply** validates that every dimension has a non-empty name, derives unique keys from names, saves to `state.dimensions`, and calls `rebuildAll()` |
+| DE-09 | `rebuildAll()` regenerates the tree, resets all statuses to `untested`, resets filters, and re-renders all views without re-binding event listeners |
+
+---
+
+## 14. Excel Export
+
+Triggered by the **⬇ Export** toolbar button. Uses the `xlsx-js-style` library (CDN). Produces a file named `test-combinations.xlsx` with two sheets.
+
+### 14.1 List Sheet
+
+One row per leaf, columns: one per dimension, Status, Remark.
+
+- Column widths: 14ch per dimension, 12ch for Status, 36ch for Remark
+- Status cells are colour-coded:
+
+| Status     | Background | Font colour |
+|------------|------------|-------------|
+| `pass`     | `#C6EFCE`  | `#006100`   |
+| `fail`     | `#FFC7CE`  | `#9C0006`   |
+| `untested` | `#FFEB9C`  | `#9C5700`   |
+| `skipped`  | `#FFD966`  | `#7F6000`   |
+
+### 14.2 Tree Sheet
+
+A top-down merged-cell layout mirroring the diagram view.
+
+- One row per dimension level; one final row for remarks
+- Each internal node spans its leftmost–rightmost leaf column via Excel merge
+- Leaf cells (bottom dimension row) are colour-coded with the same palette as the List sheet
+- Cell content format: `label (status)`
+
+---
+
+## 15. Toolbar Summary
+
+| Button            | Action |
+|-------------------|--------|
+| ⚙ Dimensions      | Opens the Dimension Editor modal |
+| ⬇ Export          | Exports current state to Excel |
+| ⊞ Expand          | Expands all nodes (List view only) |
+| ⊟ Collapse        | Collapses all non-root nodes (List view only) |
+| ☰ List            | Switches to List view |
+| ⊛ Diagram         | Switches to Diagram view (default) |
+
+---
+
+## 16. Non-Functional Requirements
+
+| ID     | Requirement |
+|--------|-------------|
+| NFR-01 | No backend required; fully client-side (HTML + CSS + JS) |
+| NFR-02 | No build step; served as static files directly from the filesystem or any HTTP server |
+| NFR-03 | External dependencies: `xlsx-js-style` (CDN, Excel export only) |
+| NFR-04 | Tree re-renders in-place on status change; no full DOM rebuild |
+| NFR-05 | Dimension changes trigger a full rebuild but do not re-bind event listeners |
+| NFR-06 | Minimum supported resolution: 1280 × 800 |
+
+---
+
+## 17. File Structure
+
+```
+index.html   — Shell: toolbar, filter bar, workspace, summary bar, context menu, CDN scripts
+style.css    — All styles: layout, component themes, status colours, diagram connectors, modal
+app.js       — All logic: state, tree builder, renderers, event handlers, export
+```
