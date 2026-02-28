@@ -15,12 +15,8 @@ const state = {
   nodes:          {},     // id -> TreeNode (flat map)
   leaves:         [],     // leaf TreeNode[] in insertion order
   selectedId:     null,   // currently selected leaf id
-  checkedIds:     new Set(),
   expandedIds:    new Set(),
   activeFilters:  {},     // key -> Set<value>  (values that are VISIBLE)
-  isRunning:      false,
-  stopRequested:  false,
-  concurrency:    4,
 };
 
 /* ── 3. Tree builder ──────────────────────────────────────────────── */
@@ -37,7 +33,6 @@ function buildTree() {
         children: [],
         isLeaf:   true,
         status:   'idle',
-        startedAt: null, finishedAt: null, logs: '',
       };
       nodes[id] = node;
       leaves.push(node);
@@ -79,99 +74,12 @@ function aggregateStatus(node) {
 }
 
 function summaryCounts() {
-  const counts = { total: state.leaves.length, idle: 0, running: 0, pass: 0, fail: 0, skipped: 0 };
+  const counts = { total: state.leaves.length, idle: 0, pass: 0, fail: 0, skipped: 0 };
   state.leaves.forEach(l => { counts[l.status] = (counts[l.status] || 0) + 1; });
   return counts;
 }
 
-/* ── 5. Mock runner ───────────────────────────────────────────────── */
-const MOCK_LOG_LINES = {
-  pass: [
-    '→ Initialising test...',
-    '→ Connecting to endpoint...',
-    '✓ Connection established',
-    '→ Sending request...',
-    '✓ Response received (200 OK)',
-    '✓ Assertions passed',
-    '✓ PASS',
-  ],
-  fail: [
-    '→ Initialising test...',
-    '→ Connecting to endpoint...',
-    '✓ Connection established',
-    '→ Sending request...',
-    '✗ Response: 500 Internal Server Error',
-    '✗ Assertion failed: expected status 200, got 500',
-    '✗ FAIL',
-  ],
-};
-
-function mockRunLeaf(leaf) {
-  return new Promise(resolve => {
-    const delay   = 400 + Math.random() * 1400;   // 400ms – 1800ms
-    const outcome = Math.random() < 0.75 ? 'pass' : 'fail';
-    const lines   = MOCK_LOG_LINES[outcome];
-
-    leaf.status    = 'running';
-    leaf.startedAt = new Date();
-    leaf.logs      = '';
-    renderNode(leaf.id);
-    updateDetail(leaf.id);
-    updateSummary();
-
-    /* stream log lines */
-    const lineDelay = delay / (lines.length + 1);
-    lines.forEach((line, i) => {
-      setTimeout(() => {
-        leaf.logs += (leaf.logs ? '\n' : '') + line;
-        updateDetail(leaf.id);
-      }, lineDelay * (i + 1));
-    });
-
-    setTimeout(() => {
-      leaf.status     = outcome;
-      leaf.finishedAt = new Date();
-      renderNode(leaf.id);
-      updateDetail(leaf.id);
-      updateSummary();
-      resolve(outcome);
-    }, delay);
-  });
-}
-
-async function runLeaves(leafNodes) {
-  if (state.isRunning) return;
-  state.isRunning     = true;
-  state.stopRequested = false;
-  el('btn-run-all').disabled      = true;
-  el('btn-run-selected').disabled = true;
-  el('btn-stop').disabled         = false;
-
-  const queue = [...leafNodes];
-  const limit = state.concurrency === 0 ? queue.length : state.concurrency;
-
-  async function worker() {
-    while (queue.length > 0 && !state.stopRequested) {
-      const leaf = queue.shift();
-      if (leaf.status === 'skipped') continue;
-      await mockRunLeaf(leaf);
-      /* re-render ancestors */
-      renderAncestors(leaf);
-    }
-  }
-
-  const workers = Array.from({ length: Math.min(limit, queue.length) }, worker);
-  await Promise.all(workers);
-
-  state.isRunning = false;
-  el('btn-run-all').disabled      = false;
-  el('btn-stop').disabled         = true;
-  const hasSel = state.checkedIds.size > 0;
-  el('btn-run-selected').disabled = !hasSel;
-  updateSummary();
-}
-
-/* ── 6. DOM helpers ───────────────────────────────────────────────── */
+/* ── 5. DOM helpers ───────────────────────────────────────────────── */
 const el   = id => document.getElementById(id);
 const $    = (sel, ctx = document) => ctx.querySelector(sel);
 const $$   = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
@@ -258,7 +166,6 @@ function buildNodeEl(node) {
     <div class="tree-row" data-node-id="${node.id}" data-leaf="${node.isLeaf}">
       <span class="tree-indent">${indentHTML}</span>
       <span class="tree-toggle ${node.isLeaf ? 'leaf' : ''}" data-toggle="${node.id}">${arrow}</span>
-      <input type="checkbox" class="tree-checkbox" data-check="${node.id}" />
       <span class="status-dot idle"></span>
       <span class="tree-label ${node.isLeaf ? 'leaf' : 'internal'}">${node.label}</span>
       ${badgePart}
@@ -302,15 +209,7 @@ function updateDetail(id) {
   badge.className   = `status-badge ${node.status}`;
 
   /* meta cards */
-  const dur = node.startedAt && node.finishedAt
-    ? `${((node.finishedAt - node.startedAt)/1000).toFixed(2)}s`
-    : node.startedAt ? 'running…' : '—';
-
-  const metaData = [
-    ...DIMENSIONS.map((dim, i) => ({ label: dim.name, val: node.path[i] })),
-    { label: 'Started',  val: node.startedAt ? node.startedAt.toLocaleTimeString() : '—' },
-    { label: 'Duration', val: dur },
-  ];
+  const metaData = DIMENSIONS.map((dim, i) => ({ label: dim.name, val: node.path[i] }));
 
   el('detail-meta').innerHTML = metaData
     .map(m => `<div class="meta-card">
@@ -318,15 +217,6 @@ function updateDetail(id) {
       <div class="meta-card-value">${m.val}</div>
     </div>`)
     .join('');
-
-  /* log */
-  el('detail-log').textContent = node.logs || '(no output)';
-  el('detail-log').scrollTop   = el('detail-log').scrollHeight;
-
-  /* buttons */
-  el('btn-detail-run').disabled  = state.isRunning;
-  el('btn-detail-skip').disabled = node.status === 'skipped';
-  el('btn-detail-reset').disabled= false;
 }
 
 function showDetail(id) {
@@ -348,7 +238,6 @@ function updateSummary() {
     { key: 'total',   label: 'total',   color: '#64748b' },
     { key: 'pass',    label: 'pass',    color: 'var(--c-pass)' },
     { key: 'fail',    label: 'fail',    color: 'var(--c-fail)' },
-    { key: 'running', label: 'running', color: 'var(--c-running)' },
     { key: 'skipped', label: 'skipped', color: 'var(--c-skipped)' },
     { key: 'idle',    label: 'idle',    color: 'var(--c-idle)' },
   ];
@@ -364,7 +253,6 @@ function updateSummary() {
   const pct2 = v => `${c.total ? ((v / c.total) * 100).toFixed(1) : 0}%`;
   el('prog-pass').style.width    = pct2(c.pass);
   el('prog-fail').style.width    = pct2(c.fail);
-  el('prog-running').style.width = pct2(c.running);
   el('prog-skipped').style.width = pct2(c.skipped);
   el('summary-pct').textContent  = `${pct}%`;
 }
@@ -414,14 +302,7 @@ function hideCtxMenu() {
   ctxTargetId = null;
 }
 
-/* ── 14. Run helpers ──────────────────────────────────────────────── */
-function runNode(id) {
-  const node = state.nodes[id];
-  if (!node) return;
-  const leavesToRun = getLeaves(node).filter(l => l.status !== 'skipped');
-  runLeaves(leavesToRun);
-}
-
+/* ── 14. Node actions ─────────────────────────────────────────────── */
 function skipNode(id) {
   const node = state.nodes[id];
   if (!node) return;
@@ -439,7 +320,6 @@ function resetNode(id) {
   if (!node) return;
   getLeaves(node).forEach(l => {
     l.status = 'idle';
-    l.startedAt = null; l.finishedAt = null; l.logs = '';
     renderNode(l.id);
     renderAncestors(l);
   });
@@ -466,26 +346,7 @@ function collapseAll() {
   Object.values(state.nodes).filter(n => !n.isLeaf && n.id !== '__root__').forEach(n => setExpanded(n.id, false));
 }
 
-/* ── 16. Checkbox helpers ─────────────────────────────────────────── */
-function setChecked(id, checked) {
-  const node = state.nodes[id];
-  if (!node) return;
-  /* check/uncheck all leaf descendants */
-  getLeaves(node).forEach(l => {
-    if (checked) state.checkedIds.add(l.id);
-    else state.checkedIds.delete(l.id);
-    const cb = document.querySelector(`[data-check="${l.id}"]`);
-    if (cb) cb.checked = checked;
-  });
-  /* sync parent checkboxes */
-  if (!node.isLeaf) {
-    const cb = document.querySelector(`[data-check="${id}"]`);
-    if (cb) cb.checked = checked;
-  }
-  el('btn-run-selected').disabled = state.checkedIds.size === 0;
-}
-
-/* ── 17. Init ─────────────────────────────────────────────────────── */
+/* ── 16. Init ─────────────────────────────────────────────────────── */
 function init() {
   /* build data */
   const { root, nodes, leaves } = buildTree();
@@ -520,12 +381,6 @@ function init() {
       return;
     }
 
-    /* checkbox */
-    if (e.target.matches('.tree-checkbox')) {
-      setChecked(id, e.target.checked);
-      return;
-    }
-
     /* leaf click → show detail */
     if (node.isLeaf) {
       showDetail(id);
@@ -548,7 +403,6 @@ function init() {
     if (!action || !ctxTargetId) return;
     const id = ctxTargetId;
     hideCtxMenu();
-    if (action === 'run' || action === 'run-subtree') runNode(id);
     if (action === 'skip')  skipNode(id);
     if (action === 'reset') resetNode(id);
   });
@@ -558,59 +412,8 @@ function init() {
   });
 
   /* ── Toolbar buttons ─────────────────────────────────────────────── */
-  el('btn-run-all').addEventListener('click', () => {
-    runLeaves(state.leaves.filter(l => l.status !== 'skipped'));
-  });
-
-  el('btn-run-selected').addEventListener('click', () => {
-    const sel = [...state.checkedIds].map(id => state.nodes[id]).filter(Boolean);
-    const leavesToRun = sel.flatMap(n => getLeaves(n)).filter(l => l.status !== 'skipped');
-    const unique = [...new Map(leavesToRun.map(l => [l.id, l])).values()];
-    runLeaves(unique);
-  });
-
-  el('btn-stop').addEventListener('click', () => {
-    state.stopRequested = true;
-    el('btn-stop').disabled = true;
-  });
-
-  el('btn-reset').addEventListener('click', () => {
-    if (state.isRunning) return;
-    state.leaves.forEach(l => {
-      l.status = 'idle'; l.startedAt = null; l.finishedAt = null; l.logs = '';
-      renderNode(l.id);
-    });
-    Object.values(state.nodes).filter(n => !n.isLeaf).forEach(n => renderNode(n.id));
-    updateDetail(state.selectedId);
-    updateSummary();
-  });
-
   el('btn-expand-all').addEventListener('click', expandAll);
   el('btn-collapse-all').addEventListener('click', collapseAll);
-
-  el('sel-concurrency').addEventListener('change', e => {
-    state.concurrency = parseInt(e.target.value, 10);
-  });
-
-  /* ── Detail panel buttons ────────────────────────────────────────── */
-  el('btn-detail-run').addEventListener('click', () => {
-    if (state.selectedId) runNode(state.selectedId);
-  });
-
-  el('btn-detail-skip').addEventListener('click', () => {
-    if (state.selectedId) { skipNode(state.selectedId); updateDetail(state.selectedId); }
-  });
-
-  el('btn-detail-reset').addEventListener('click', () => {
-    if (state.selectedId) { resetNode(state.selectedId); updateDetail(state.selectedId); }
-  });
-
-  el('btn-clear-log').addEventListener('click', () => {
-    if (state.selectedId) {
-      const node = state.nodes[state.selectedId];
-      if (node) { node.logs = ''; el('detail-log').textContent = '(no output)'; }
-    }
-  });
 }
 
 /* ── Boot ─────────────────────────────────────────────────────────── */
