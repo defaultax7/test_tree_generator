@@ -414,6 +414,39 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
 
 .detail-actions { display: flex; gap: 8px; }
 
+.remark-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.remark-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+.remark-textarea {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  resize: vertical;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.remark-textarea:focus {
+  outline: none;
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14,165,233,.15);
+}
+
 /* override ghost style in light context */
 .detail-actions .btn-ghost {
   background: #f1f5f9;

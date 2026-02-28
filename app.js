@@ -33,6 +33,7 @@ function buildTree() {
         children: [],
         isLeaf:   true,
         status:   'idle',
+        remark:   '',
       };
       nodes[id] = node;
       leaves.push(node);
@@ -223,6 +224,9 @@ function updateDetail(id) {
   el('btn-mark-fail').disabled  = node.status === 'fail';
   el('btn-mark-skip').disabled  = node.status === 'skipped';
   el('btn-mark-reset').disabled = node.status === 'idle';
+
+  /* remark */
+  el('remark-input').value = node.remark;
 }
 
 function showDetail(id) {
@@ -419,6 +423,13 @@ function init() {
   el('btn-mark-fail').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'fail'); });
   el('btn-mark-skip').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'skipped'); });
   el('btn-mark-reset').addEventListener('click', () => { if (state.selectedId) markNode(state.selectedId, 'idle'); });
+
+  /* ── Remark textarea ─────────────────────────────────────────────── */
+  el('remark-input').addEventListener('input', e => {
+    if (!state.selectedId) return;
+    const node = state.nodes[state.selectedId];
+    if (node) node.remark = e.target.value;
+  });
 }
 
 /* ── Boot ─────────────────────────────────────────────────────────── */
