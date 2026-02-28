@@ -17,9 +17,10 @@
       </div>
 
       <div class="toolbar-actions">
-        <button id="btn-edit-dims"    class="btn btn-secondary btn-sm">⚙ Dimensions</button>
+        <button id="btn-edit-dims"         class="btn btn-secondary btn-sm">⚙ Dimensions</button>
+        <button id="btn-edit-result-dims"  class="btn btn-secondary btn-sm">⚙ Results</button>
         <div class="sep"></div>
-        <button id="btn-export"       class="btn btn-ghost btn-sm">⬇ Export</button>
+        <button id="btn-export"            class="btn btn-ghost btn-sm">⬇ Export</button>
         <div class="sep"></div>
         <button id="btn-expand-all"   class="btn btn-ghost">⊞ Expand</button>
         <button id="btn-collapse-all" class="btn btn-ghost">⊟ Collapse</button>
@@ -57,11 +58,8 @@
             <span class="status-badge" id="detail-status-badge"></span>
           </div>
           <div class="detail-meta" id="detail-meta"></div>
-          <div class="detail-actions">
-            <button id="btn-mark-pass"  class="btn btn-mark-pass  btn-sm">✓ Pass</button>
-            <button id="btn-mark-fail"  class="btn btn-mark-fail  btn-sm">✗ Fail</button>
-            <button id="btn-mark-skip"  class="btn btn-mark-skip  btn-sm">⊘ Skip</button>
-            <button id="btn-mark-reset" class="btn btn-ghost      btn-sm">↺ Reset</button>
+          <div class="detail-actions" id="detail-actions">
+            <!-- injected dynamically per result dimension -->
           </div>
           <div class="remark-box">
             <label class="remark-label" for="remark-input">Remark</label>

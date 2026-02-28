@@ -12,6 +12,10 @@ const state = {
     { name: 'Platform',     key: 'platform', values: ['native', 'docker', 'k8s'] },
     { name: 'Action',       key: 'action',   values: ['get', 'post'] },
   ],
+  resultDimensions: [
+    { name: 'Backend',  key: 'backend'  },
+    { name: 'Frontend', key: 'frontend' },
+  ],
   tree:           null,
   nodes:          {},
   leaves:         [],
@@ -34,7 +38,7 @@ function buildTree() {
         label:    path[path.length - 1],
         children: [],
         isLeaf:   true,
-        status:   'untested',
+        results:  Object.fromEntries(state.resultDimensions.map(r => [r.key, 'untested'])),
         remark:   '',
       };
       nodes[id] = node;
@@ -64,22 +68,54 @@ function getLeaves(node) {
   return node.children.flatMap(getLeaves);
 }
 
+/* Derive a single display status from a leaf's multi-dimensional results */
+function derivedLeafStatus(leaf) {
+  const vals = Object.values(leaf.results);
+  if (!vals.length)                          return 'untested';
+  if (vals.every(v => v === 'untested'))     return 'untested';
+  if (vals.every(v => v === 'pass'))         return 'pass';
+  if (vals.every(v => v === 'skipped'))      return 'skipped';
+  if (vals.every(v => v === 'fail'))         return 'fail';
+  if (vals.some(v => v === 'running'))       return 'running';
+  if (vals.some(v => v === 'fail'))          return 'fail';
+  return 'partial';
+}
+
+/* Aggregate status for a node (used for box class / badge on internal nodes) */
 function aggregateStatus(node) {
-  if (node.isLeaf) return node.status;
-  const statuses = getLeaves(node).map(l => l.status);
-  if (statuses.every(s => s === 'untested'))    return 'untested';
-  if (statuses.every(s => s === 'pass'))    return 'pass';
-  if (statuses.every(s => s === 'skipped')) return 'skipped';
-  if (statuses.every(s => s === 'fail'))    return 'fail';
-  if (statuses.some(s => s === 'running'))  return 'running';
-  if (statuses.some(s => s === 'fail'))     return 'fail';
+  if (node.isLeaf) return derivedLeafStatus(node);
+  const statuses = getLeaves(node).map(derivedLeafStatus);
+  if (statuses.every(s => s === 'untested')) return 'untested';
+  if (statuses.every(s => s === 'pass'))     return 'pass';
+  if (statuses.every(s => s === 'skipped'))  return 'skipped';
+  if (statuses.every(s => s === 'fail'))     return 'fail';
+  if (statuses.some(s => s === 'running'))   return 'running';
+  if (statuses.some(s => s === 'fail'))      return 'fail';
+  return 'partial';
+}
+
+/* Aggregate a single result-dimension key across all leaf descendants */
+function aggregateOneResult(node, key) {
+  const vals = getLeaves(node).map(l => (l.results && l.results[key]) || 'untested');
+  if (vals.every(v => v === 'untested')) return 'untested';
+  if (vals.every(v => v === 'pass'))     return 'pass';
+  if (vals.every(v => v === 'skipped'))  return 'skipped';
+  if (vals.every(v => v === 'fail'))     return 'fail';
+  if (vals.some(v => v === 'running'))   return 'running';
+  if (vals.some(v => v === 'fail'))      return 'fail';
   return 'partial';
 }
 
 function summaryCounts() {
-  const counts = { total: state.leaves.length, untested: 0, pass: 0, fail: 0, skipped: 0 };
-  state.leaves.forEach(l => { counts[l.status] = (counts[l.status] || 0) + 1; });
-  return counts;
+  const total = state.leaves.length;
+  return state.resultDimensions.map(r => {
+    const c = { key: r.key, name: r.name, total, pass: 0, fail: 0, skipped: 0, untested: 0 };
+    state.leaves.forEach(l => {
+      const s = (l.results && l.results[r.key]) || 'untested';
+      c[s] = (c[s] || 0) + 1;
+    });
+    return c;
+  });
 }
 
 /* ── 5. DOM helpers ───────────────────────────────────────────────── */
@@ -139,21 +175,29 @@ function applyFilters() {
 
 /* ── 8. Render a single tree row ──────────────────────────────────── */
 function renderNode(id) {
-  const node    = state.nodes[id];
+  const node  = state.nodes[id];
   if (!node) return;
-  const rowEl   = document.querySelector(`[data-node-id="${id}"]`);
-  if (!rowEl)   return;
+  const rowEl = document.querySelector(`[data-node-id="${id}"]`);
+  if (!rowEl) return;
 
-  const status  = node.isLeaf ? node.status : aggregateStatus(node);
-  const dotEl   = rowEl.querySelector('.status-dot');
-  if (dotEl) { dotEl.className = `status-dot ${status}`; }
+  /* update each result-dim dot */
+  state.resultDimensions.forEach(r => {
+    const dot = rowEl.querySelector(`[data-result-key="${r.key}"]`);
+    if (!dot) return;
+    const s = node.isLeaf
+      ? ((node.results && node.results[r.key]) || 'untested')
+      : aggregateOneResult(node, r.key);
+    dot.className = `status-dot ${s}`;
+  });
 
+  /* update badge on internal nodes (uses derived aggregate for counts) */
   const badgeEl = rowEl.querySelector('.node-badge');
   if (badgeEl && !node.isLeaf) {
-    const leaves  = getLeaves(node);
-    const pass    = leaves.filter(l => l.status === 'pass').length;
-    const fail    = leaves.filter(l => l.status === 'fail').length;
-    const total   = leaves.length;
+    const leaves = getLeaves(node);
+    const pass   = leaves.filter(l => derivedLeafStatus(l) === 'pass').length;
+    const fail   = leaves.filter(l => derivedLeafStatus(l) === 'fail').length;
+    const total  = leaves.length;
+    const status = aggregateStatus(node);
     badgeEl.textContent = fail ? `${fail}✗ ${pass}✓` : `${pass}/${total}`;
     badgeEl.className   = `node-badge ${status}`;
   }
@@ -168,28 +212,34 @@ function renderDiagramNode(id) {
   const box = document.getElementById(`tdd-${id}`);
   if (!box) return;
 
-  const status = node.isLeaf ? node.status : aggregateStatus(node);
+  const status = aggregateStatus(node);
 
-  /* update classes */
+  /* update box class */
   const base = `td-box ${node.isLeaf ? 'td-leaf' : 'td-internal'} ${status}`;
   box.className = state.selectedId === id ? `${base} selected` : base;
 
-  /* update dot */
-  const dot = box.querySelector('.status-dot');
-  if (dot) dot.className = `status-dot ${status}`;
+  /* update each result-dim dot */
+  state.resultDimensions.forEach(r => {
+    const dot = box.querySelector(`[data-result-key="${r.key}"]`);
+    if (!dot) return;
+    const s = node.isLeaf
+      ? ((node.results && node.results[r.key]) || 'untested')
+      : aggregateOneResult(node, r.key);
+    dot.className = `status-dot ${s}`;
+  });
 
   /* update badge */
   const badge = box.querySelector('.node-badge');
   if (badge && !node.isLeaf) {
     const leaves = getLeaves(node);
-    const pass   = leaves.filter(l => l.status === 'pass').length;
-    const fail   = leaves.filter(l => l.status === 'fail').length;
+    const pass   = leaves.filter(l => derivedLeafStatus(l) === 'pass').length;
+    const fail   = leaves.filter(l => derivedLeafStatus(l) === 'fail').length;
     const total  = leaves.length;
     badge.textContent = fail ? `${fail}✗ ${pass}✓` : `${pass}/${total}`;
     badge.className   = `node-badge ${status}`;
   }
 
-  /* update remark dot visibility for leaves */
+  /* remark dot for leaves */
   if (node.isLeaf) {
     const rdot = box.querySelector('.td-remark-dot');
     if (rdot) rdot.hidden = !node.remark;
@@ -216,11 +266,16 @@ function buildNodeEl(node) {
   const badgeVal = node.isLeaf ? '' : `0/${leaves.length}`;
   const badgePart= node.isLeaf ? '' : `<span class="node-badge">${badgeVal}</span>`;
 
+  /* multi-dot group — one dot per result dimension */
+  const dotsHTML = state.resultDimensions
+    .map(r => `<span class="status-dot untested" data-result-key="${r.key}" title="${r.name}"></span>`)
+    .join('');
+
   wrapper.innerHTML = `
     <div class="tree-row" data-node-id="${node.id}" data-leaf="${node.isLeaf}">
       <span class="tree-indent">${indentHTML}</span>
       <span class="tree-toggle ${node.isLeaf ? 'leaf' : ''}" data-toggle="${node.id}">${arrow}</span>
-      <span class="status-dot untested"></span>
+      <span class="status-dots">${dotsHTML}</span>
       <span class="tree-label ${node.isLeaf ? 'leaf' : 'internal'}">${node.label}</span>
       ${badgePart}
     </div>`;
@@ -244,19 +299,30 @@ function renderFullTree() {
 
 /* ── 10. Build diagram DOM ────────────────────────────────────────── */
 function buildDiagramNode(node) {
-  const li     = document.createElement('li');
+  const li = document.createElement('li');
   li.dataset.nodeId = node.id;
-  const status = node.isLeaf ? node.status : aggregateStatus(node);
+  const status = aggregateStatus(node);
 
   /* box */
   const box = document.createElement('div');
-  box.id          = `tdd-${node.id}`;
-  box.className   = `td-box ${node.isLeaf ? 'td-leaf' : 'td-internal'} ${status}`;
+  box.id             = `tdd-${node.id}`;
+  box.className      = `td-box ${node.isLeaf ? 'td-leaf' : 'td-internal'} ${status}`;
   box.dataset.nodeId = node.id;
 
-  const dot = document.createElement('span');
-  dot.className = `status-dot ${status}`;
-  box.appendChild(dot);
+  /* multi-dot group — one dot per result dimension */
+  const dotGroup = document.createElement('span');
+  dotGroup.className = 'status-dots';
+  state.resultDimensions.forEach(r => {
+    const dot = document.createElement('span');
+    const s = node.isLeaf
+      ? ((node.results && node.results[r.key]) || 'untested')
+      : aggregateOneResult(node, r.key);
+    dot.className        = `status-dot ${s}`;
+    dot.dataset.resultKey = r.key;
+    dot.title            = r.name;
+    dotGroup.appendChild(dot);
+  });
+  box.appendChild(dotGroup);
 
   const label = document.createElement('span');
   label.className   = 'td-label';
@@ -265,15 +331,15 @@ function buildDiagramNode(node) {
 
   if (!node.isLeaf) {
     const leaves = getLeaves(node);
-    const pass   = leaves.filter(l => l.status === 'pass').length;
-    const fail   = leaves.filter(l => l.status === 'fail').length;
+    const pass   = leaves.filter(l => derivedLeafStatus(l) === 'pass').length;
+    const fail   = leaves.filter(l => derivedLeafStatus(l) === 'fail').length;
     const total  = leaves.length;
     const badge  = document.createElement('span');
     badge.className   = `node-badge ${status}`;
     badge.textContent = fail ? `${fail}✗ ${pass}✓` : `${pass}/${total}`;
     box.appendChild(badge);
   } else {
-    /* remark indicator dot — shown when remark non-empty */
+    /* remark indicator dot */
     const rdot = document.createElement('span');
     rdot.className = 'td-remark-dot';
     rdot.title     = 'Has remark';
@@ -312,29 +378,40 @@ function updateDetail(id) {
 
   /* breadcrumb */
   el('detail-breadcrumb').innerHTML = node.path
-    .map((seg, i) => `<span class="breadcrumb-seg">${seg}</span>${i < node.path.length-1 ? '<span class="breadcrumb-sep">›</span>' : ''}`)
+    .map((seg, i) => `<span class="breadcrumb-seg">${seg}</span>${i < node.path.length - 1 ? '<span class="breadcrumb-sep">›</span>' : ''}`)
     .join('');
 
-  /* status badge */
-  const badge = el('detail-status-badge');
-  badge.textContent = node.status.toUpperCase();
-  badge.className   = `status-badge ${node.status}`;
+  /* status badge — show derived overall status */
+  const derived = derivedLeafStatus(node);
+  const badge   = el('detail-status-badge');
+  badge.textContent = derived.toUpperCase();
+  badge.className   = `status-badge ${derived}`;
 
   /* meta cards */
-  const metaData = state.dimensions.map((dim, i) => ({ label: dim.name, val: node.path[i] }));
-
-  el('detail-meta').innerHTML = metaData
-    .map(m => `<div class="meta-card">
-      <div class="meta-card-label">${m.label}</div>
-      <div class="meta-card-value">${m.val}</div>
+  el('detail-meta').innerHTML = state.dimensions
+    .map((dim, i) => `<div class="meta-card">
+      <div class="meta-card-label">${dim.name}</div>
+      <div class="meta-card-value">${node.path[i]}</div>
     </div>`)
     .join('');
 
-  /* action button states — disable the button matching the current status */
-  el('btn-mark-pass').disabled  = node.status === 'pass';
-  el('btn-mark-fail').disabled  = node.status === 'fail';
-  el('btn-mark-skip').disabled  = node.status === 'skipped';
-  el('btn-mark-reset').disabled = node.status === 'untested';
+  /* per-result-dim action rows (injected dynamically) */
+  el('detail-actions').innerHTML = state.resultDimensions.map(r => {
+    const s = (node.results && node.results[r.key]) || 'untested';
+    return `<div class="detail-result-row">
+      <span class="result-row-label">${r.name}</span>
+      <div class="result-row-btns">
+        <button class="btn btn-mark-pass btn-sm" data-result-key="${r.key}" data-action="pass"
+          ${s === 'pass'     ? 'disabled' : ''}>✓ Pass</button>
+        <button class="btn btn-mark-fail btn-sm" data-result-key="${r.key}" data-action="fail"
+          ${s === 'fail'     ? 'disabled' : ''}>✗ Fail</button>
+        <button class="btn btn-mark-skip btn-sm" data-result-key="${r.key}" data-action="skip"
+          ${s === 'skipped'  ? 'disabled' : ''}>⊘ Skip</button>
+        <button class="btn btn-ghost     btn-sm" data-result-key="${r.key}" data-action="reset"
+          ${s === 'untested' ? 'disabled' : ''}>↺ Reset</button>
+      </div>
+    </div>`;
+  }).join('');
 
   /* remark */
   el('remark-input').value = node.remark;
@@ -358,31 +435,53 @@ function showDetail(id) {
 
 /* ── 11. Summary bar ──────────────────────────────────────────────── */
 function updateSummary() {
-  const c     = summaryCounts();
-  const done  = c.pass + c.fail + c.skipped;
-  const pct   = c.total ? Math.round((done / c.total) * 100) : 0;
+  const dimCounts = summaryCounts(); /* array of { key, name, total, pass, fail, skipped, untested } */
 
-  const countDefs = [
-    { key: 'total',   label: 'total',   color: '#64748b' },
-    { key: 'pass',    label: 'pass',    color: 'var(--c-pass)' },
-    { key: 'fail',    label: 'fail',    color: 'var(--c-fail)' },
-    { key: 'skipped', label: 'skipped', color: 'var(--c-skipped)' },
-    { key: 'untested',    label: 'untested',    color: 'var(--c-untested)' },
-  ];
+  const pct2 = (v, total) => `${total ? ((v / total) * 100).toFixed(1) : 0}%`;
 
-  el('summary-counts').innerHTML = countDefs
-    .map(d => `<span class="summary-count">
-      <span class="summary-count-dot" style="background:${d.color}"></span>
-      <span class="summary-count-val">${c[d.key]}</span>
-      <span class="summary-count-lbl">${d.label}</span>
-    </span>`)
-    .join('');
+  el('summary-counts').innerHTML = dimCounts.map(c => {
+    const done = c.pass + c.fail + c.skipped;
+    const pct  = c.total ? Math.round((done / c.total) * 100) : 0;
+    return `<span class="summary-result-row">
+      <span class="summary-result-label">${c.name}</span>
+      <span class="summary-count">
+        <span class="summary-count-dot" style="background:var(--c-pass)"></span>
+        <span class="summary-count-val">${c.pass}</span>
+      </span>
+      <span class="summary-count">
+        <span class="summary-count-dot" style="background:var(--c-fail)"></span>
+        <span class="summary-count-val">${c.fail}</span>
+      </span>
+      <span class="summary-count">
+        <span class="summary-count-dot" style="background:var(--c-skipped)"></span>
+        <span class="summary-count-val">${c.skipped}</span>
+      </span>
+      <span class="summary-count">
+        <span class="summary-count-dot" style="background:var(--c-untested)"></span>
+        <span class="summary-count-val">${c.untested}</span>
+      </span>
+      <div class="summary-mini-bar">
+        <div class="progress-fill pass"    style="width:${pct2(c.pass,    c.total)}"></div>
+        <div class="progress-fill fail"    style="width:${pct2(c.fail,    c.total)}"></div>
+        <div class="progress-fill skipped" style="width:${pct2(c.skipped, c.total)}"></div>
+      </div>
+      <span class="summary-pct-mini">${pct}%</span>
+    </span>`;
+  }).join('');
 
-  const pct2 = v => `${c.total ? ((v / c.total) * 100).toFixed(1) : 0}%`;
-  el('prog-pass').style.width    = pct2(c.pass);
-  el('prog-fail').style.width    = pct2(c.fail);
-  el('prog-skipped').style.width = pct2(c.skipped);
-  el('summary-pct').textContent  = `${pct}%`;
+  /* update the main progress bar using the average across all result dims */
+  const totalSlots = dimCounts.reduce((s, c) => s + c.total, 0);
+  const totalDone  = dimCounts.reduce((s, c) => s + c.pass + c.fail + c.skipped, 0);
+  const totalPass  = dimCounts.reduce((s, c) => s + c.pass, 0);
+  const totalFail  = dimCounts.reduce((s, c) => s + c.fail, 0);
+  const totalSkip  = dimCounts.reduce((s, c) => s + c.skipped, 0);
+  const avgPct     = totalSlots ? Math.round((totalDone / totalSlots) * 100) : 0;
+
+  const pctOfAll = v => `${totalSlots ? ((v / totalSlots) * 100).toFixed(1) : 0}%`;
+  el('prog-pass').style.width    = pctOfAll(totalPass);
+  el('prog-fail').style.width    = pctOfAll(totalFail);
+  el('prog-skipped').style.width = pctOfAll(totalSkip);
+  el('summary-pct').textContent  = `${avgPct}%`;
 }
 
 /* ── 12. Filter bar ───────────────────────────────────────────────── */
@@ -435,10 +534,22 @@ function markNode(id, status) {
   const node = state.nodes[id];
   if (!node) return;
   getLeaves(node).forEach(l => {
-    l.status = status;
+    /* set every result dimension to the same status */
+    state.resultDimensions.forEach(r => { l.results[r.key] = status; });
     renderNode(l.id);
     renderAncestors(l);
   });
+  updateDetail(id);
+  updateSummary();
+}
+
+/* Set a single result dimension on a single leaf */
+function markNodeOneResult(id, resultKey, status) {
+  const node = state.nodes[id];
+  if (!node || !node.isLeaf) return;
+  node.results[resultKey] = status;
+  renderNode(id);
+  renderAncestors(node);
   updateDetail(id);
   updateSummary();
 }
@@ -623,7 +734,111 @@ function openDimModal() {
   });
 }
 
-/* ── 19. Excel export ──────────────────────────────────────────────── */
+/* ── 19. Result-dimension editor modal ─────────────────────────────── */
+/* rebuildResultData — reshapes leaf.results without regenerating the tree */
+function rebuildResultData() {
+  state.leaves.forEach(leaf => {
+    const fresh = Object.fromEntries(state.resultDimensions.map(r => [r.key, 'untested']));
+    /* preserve status for keys that still exist */
+    if (leaf.results) {
+      state.resultDimensions.forEach(r => {
+        if (leaf.results[r.key] !== undefined) fresh[r.key] = leaf.results[r.key];
+      });
+    }
+    leaf.results = fresh;
+  });
+  /* rebuild both views — dot structure (count + data-result-key) has changed */
+  renderFullTree();
+  buildDiagram();
+  applyFilters();
+  /* update detail panel if open */
+  if (state.selectedId) updateDetail(state.selectedId);
+  updateSummary();
+}
+
+function openResultDimModal() {
+  /* work on a deep clone so Cancel discards changes */
+  let draft = state.resultDimensions.map(r => ({ name: r.name, key: r.key }));
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'dim-backdrop';
+  backdrop.innerHTML = `
+    <div class="dim-modal" role="dialog" aria-modal="true" aria-label="Edit Result Dimensions">
+      <div class="dim-modal-header">
+        <span class="dim-modal-title">Edit Result Dimensions</span>
+        <button class="btn btn-ghost btn-xs dim-modal-close" title="Close">✕</button>
+      </div>
+      <div class="dim-modal-body" id="rdim-modal-body"></div>
+      <div class="dim-modal-footer">
+        <button class="btn btn-ghost btn-sm" id="rdim-btn-add">+ Add Result Dimension</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-secondary btn-sm" id="rdim-btn-cancel">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="rdim-btn-apply">Apply</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  function renderBody() {
+    const body = backdrop.querySelector('#rdim-modal-body');
+    body.innerHTML = '';
+    draft.forEach((r, i) => {
+      const card = document.createElement('div');
+      card.className = 'dim-card';
+      card.innerHTML = `
+        <div class="dim-card-header">
+          <input class="dim-name-input" value="${r.name}" placeholder="Result dimension name"
+            data-ridx="${i}" />
+          <button class="btn btn-ghost btn-xs rdim-remove" data-ridx="${i}" title="Remove"
+            ${draft.length <= 1 ? 'disabled' : ''}>✕</button>
+        </div>`;
+      body.appendChild(card);
+    });
+  }
+
+  renderBody();
+
+  backdrop.addEventListener('input', e => {
+    if (e.target.classList.contains('dim-name-input')) {
+      draft[+e.target.dataset.ridx].name = e.target.value;
+    }
+  });
+
+  backdrop.addEventListener('click', e => {
+    if (e.target.classList.contains('rdim-remove')) {
+      const i = +e.target.dataset.ridx;
+      if (draft.length <= 1) return;
+      draft.splice(i, 1); renderBody(); return;
+    }
+    if (e.target.id === 'rdim-btn-add') {
+      draft.push({ name: 'New Result', key: '' });
+      renderBody();
+      const inputs = backdrop.querySelectorAll('.dim-name-input');
+      const last = inputs[inputs.length - 1];
+      last.focus(); last.select(); return;
+    }
+    if (e.target.id === 'rdim-btn-cancel' || e.target.classList.contains('dim-modal-close')) {
+      backdrop.remove(); return;
+    }
+    if (e.target.id === 'rdim-btn-apply') {
+      for (const r of draft) {
+        if (!r.name.trim()) { alert('Each result dimension must have a name.'); return; }
+      }
+      /* derive unique keys from names */
+      const seen = {};
+      state.resultDimensions = draft.map(r => {
+        let key = r.name.trim().toLowerCase().replace(/\s+/g, '_');
+        if (seen[key] !== undefined) key += '_' + (++seen[key]);
+        else seen[key] = 0;
+        return { name: r.name.trim(), key };
+      });
+      backdrop.remove();
+      rebuildResultData(); return;
+    }
+    if (e.target === backdrop) { backdrop.remove(); }
+  });
+}
+
+/* ── 20. Excel export ──────────────────────────────────────────────── */
 function exportExcel() {
   const XLSX = window.XLSX;
   if (!XLSX) { alert('xlsx-js-style not loaded.'); return; }
@@ -644,29 +859,34 @@ function exportExcel() {
   }
 
   /* ── Sheet 1: List ─────────────────────────────────────────────── */
-  const listHeaders = [...state.dimensions.map(d => d.name), 'Status', 'Remark'];
+  /* Headers: one per tree dimension + one per result dimension + Remark */
+  const resultHeaders = state.resultDimensions.map(r => `${r.name} Status`);
+  const listHeaders   = [...state.dimensions.map(d => d.name), ...resultHeaders, 'Remark'];
   const listRows = [listHeaders];
   state.leaves.forEach(leaf => {
-    listRows.push([...leaf.path, leaf.status, leaf.remark]);
+    const resultValues = state.resultDimensions.map(r => (leaf.results && leaf.results[r.key]) || 'untested');
+    listRows.push([...leaf.path, ...resultValues, leaf.remark]);
   });
   const ws1 = XLSX.utils.aoa_to_sheet(listRows);
   ws1['!cols'] = [
     ...state.dimensions.map(() => ({ wch: 14 })),
-    { wch: 12 },
+    ...state.resultDimensions.map(() => ({ wch: 14 })),
     { wch: 36 },
   ];
 
-  /* Color the Status column (index = dimensions.length) for each data row */
-  const statusCol = colLetter(state.dimensions.length);
-  state.leaves.forEach((leaf, i) => {
-    const addr = `${statusCol}${i + 2}`; /* row 1 = header, data starts at row 2 */
-    const cell = ws1[addr];
-    if (cell && statusStyle[leaf.status]) cell.s = statusStyle[leaf.status];
+  /* Colour each result-dimension status column */
+  state.resultDimensions.forEach((r, ri) => {
+    const colIdx = state.dimensions.length + ri;
+    const col    = colLetter(colIdx);
+    state.leaves.forEach((leaf, rowIdx) => {
+      const addr   = `${col}${rowIdx + 2}`; /* row 1 = header */
+      const cell   = ws1[addr];
+      const status = (leaf.results && leaf.results[r.key]) || 'untested';
+      if (cell && statusStyle[status]) cell.s = statusStyle[status];
+    });
   });
 
   /* ── Sheet 2: Top-down tree diagram ───────────────────────────── */
-  /* Assign each leaf a sequential column; internal nodes span their
-     leftmost–rightmost leaf columns (merged in Excel).              */
   let leafIdx = 0;
   function assignCols(node) {
     if (node.isLeaf) {
@@ -681,41 +901,48 @@ function exportExcel() {
 
   const numCols   = leafIdx;
   const numLevels = state.dimensions.length;
-  /* rows: one per dimension level + one remark row at the bottom */
-  const numRows   = numLevels + 1;
+  const numRows   = numLevels + 1; /* +1 for remarks */
 
   const grid      = Array.from({ length: numRows }, () => Array(numCols).fill(null));
   const merges    = [];
-  const leafCells = []; /* track { row, col, status } for coloring */
+  const leafCells = [];
 
   function fillGrid(node) {
     if (node.id === '__root__') { node.children.forEach(fillGrid); return; }
-    const row    = node.depth - 1;   /* depth 1 → row 0, depth 2 → row 1, … */
-    const status = node.isLeaf ? node.status : aggregateStatus(node);
-    grid[row][node._c] = `${node.label} (${status})`;
-    /* merge across all leaf columns this node covers */
-    if (node._cEnd > node._c) {
-      merges.push({ s: { r: row, c: node._c }, e: { r: row, c: node._cEnd } });
-    }
+    const row = node.depth - 1;
     if (node.isLeaf) {
-      leafCells.push({ row, col: node._c, status: node.status });
-      /* remarks live in the final row at the leaf's column */
+      /* multi-line cell: label + one line per result dimension */
+      const resultLines = state.resultDimensions
+        .map(r => `${r.name}: ${(node.results && node.results[r.key]) || 'untested'}`)
+        .join('\n');
+      grid[row][node._c] = `${node.label}\n${resultLines}`;
+      leafCells.push({ row, col: node._c, status: derivedLeafStatus(node) });
       if (node.remark) grid[numLevels][node._c] = node.remark;
+    } else {
+      const status = aggregateStatus(node);
+      grid[row][node._c] = `${node.label} (${status})`;
+      if (node._cEnd > node._c) {
+        merges.push({ s: { r: row, c: node._c }, e: { r: row, c: node._cEnd } });
+      }
+      node.children.forEach(fillGrid);
     }
-    if (!node.isLeaf) node.children.forEach(fillGrid);
   }
   fillGrid(state.tree);
 
   const ws2 = XLSX.utils.aoa_to_sheet(grid);
   ws2['!merges'] = merges;
-  ws2['!cols']   = Array.from({ length: numCols }, () => ({ wch: 16 }));
-  ws2['!rows']   = Array.from({ length: numRows }, () => ({ hpt: 28 }));
+  ws2['!cols']   = Array.from({ length: numCols }, () => ({ wch: 18 }));
+  ws2['!rows']   = Array.from({ length: numRows }, () => ({ hpt: 16 + state.resultDimensions.length * 14 }));
 
-  /* Color leaf cells in Tree sheet */
+  /* Enable text wrap for leaf cells (they contain \n) */
   leafCells.forEach(({ row, col, status }) => {
-    const addr = `${colLetter(col)}${row + 1}`; /* 1-indexed row */
+    const addr = `${colLetter(col)}${row + 1}`;
     const cell = ws2[addr];
-    if (cell && statusStyle[status]) cell.s = statusStyle[status];
+    if (!cell) return;
+    cell.s = {
+      ...(statusStyle[status] || {}),
+      alignment: { wrapText: true, vertical: 'top' },
+    };
   });
 
   /* ── Build workbook ───────────────────────────────────────────── */
@@ -725,7 +952,7 @@ function exportExcel() {
   XLSX.writeFile(wb, 'test-combinations.xlsx');
 }
 
-/* ── 20. Init ─────────────────────────────────────────────────────── */
+/* ── 21. Init ─────────────────────────────────────────────────────── */
 function init() {
   /* build data */
   const { root, nodes, leaves } = buildTree();
@@ -800,6 +1027,7 @@ function init() {
   el('btn-view-list').addEventListener('click',    () => setViewMode('list'));
   el('btn-view-diagram').addEventListener('click', () => setViewMode('diagram'));
   el('btn-edit-dims').addEventListener('click', openDimModal);
+  el('btn-edit-result-dims').addEventListener('click', openResultDimModal);
   el('btn-export').addEventListener('click', exportExcel);
 
   /* ── Diagram interactions ────────────────────────────────────────── */
@@ -818,11 +1046,16 @@ function init() {
     showCtxMenu(e.clientX, e.clientY, box.dataset.nodeId);
   });
 
-  /* ── Detail panel mark buttons ───────────────────────────────────── */
-  el('btn-mark-pass').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'pass'); });
-  el('btn-mark-fail').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'fail'); });
-  el('btn-mark-skip').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'skipped'); });
-  el('btn-mark-reset').addEventListener('click', () => { if (state.selectedId) markNode(state.selectedId, 'untested'); });
+  /* ── Detail panel: per-result-dim mark buttons (event delegation) ── */
+  el('detail-content').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-result-key][data-action]');
+    if (!btn || !state.selectedId) return;
+    const resultKey = btn.dataset.resultKey;
+    const action    = btn.dataset.action;
+    const statusMap = { pass: 'pass', fail: 'fail', skip: 'skipped', reset: 'untested' };
+    const newStatus = statusMap[action];
+    if (newStatus !== undefined) markNodeOneResult(state.selectedId, resultKey, newStatus);
+  });
 
   /* ── Remark textarea ─────────────────────────────────────────────── */
   el('remark-input').addEventListener('input', e => {

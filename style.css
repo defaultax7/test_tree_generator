@@ -507,16 +507,19 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
   border-top: 1px solid rgba(255,255,255,.06);
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 6px 16px;
   gap: 16px;
   z-index: 10;
+  min-height: 42px;
+  flex-wrap: wrap;
 }
 
 .summary-counts {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 0;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .summary-count {
@@ -915,4 +918,84 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
   outline: none;
   border-style: solid;
   border-color: #0ea5e9;
+}
+
+/* ── Multi-dot status group ────────────────────────────────────────── */
+.status-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ── Detail panel: per-result-dimension rows ───────────────────────── */
+.detail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.detail-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.result-row-label {
+  min-width: 76px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  flex-shrink: 0;
+}
+
+.result-row-btns {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* ── Summary bar: per-result-dimension rows ────────────────────────── */
+.summary-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.summary-result-row + .summary-result-row {
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+
+.summary-result-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.summary-mini-bar {
+  width: 80px;
+  height: 6px;
+  border-radius: 3px;
+  background: #e2e8f0;
+  overflow: hidden;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.summary-pct-mini {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  min-width: 30px;
+  text-align: right;
 }
