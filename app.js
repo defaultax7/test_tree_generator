@@ -11,12 +11,13 @@ const DIMENSIONS = [
 
 /* ── 2. State ─────────────────────────────────────────────────────── */
 const state = {
-  tree:           null,   // root TreeNode
-  nodes:          {},     // id -> TreeNode (flat map)
-  leaves:         [],     // leaf TreeNode[] in insertion order
-  selectedId:     null,   // currently selected leaf id
+  tree:           null,
+  nodes:          {},
+  leaves:         [],
+  selectedId:     null,
   expandedIds:    new Set(),
-  activeFilters:  {},     // key -> Set<value>  (values that are VISIBLE)
+  activeFilters:  {},
+  viewMode:       'list',   // 'list' | 'diagram'
 };
 
 /* ── 3. Tree builder ──────────────────────────────────────────────── */
@@ -141,6 +142,43 @@ function renderNode(id) {
     badgeEl.textContent = fail ? `${fail}✗ ${pass}✓` : `${pass}/${total}`;
     badgeEl.className   = `node-badge ${status}`;
   }
+
+  /* keep diagram in sync */
+  renderDiagramNode(id);
+}
+
+function renderDiagramNode(id) {
+  const node = state.nodes[id];
+  if (!node) return;
+  const box = document.getElementById(`tdd-${id}`);
+  if (!box) return;
+
+  const status = node.isLeaf ? node.status : aggregateStatus(node);
+
+  /* update classes */
+  const base = `td-box ${node.isLeaf ? 'td-leaf' : 'td-internal'} ${status}`;
+  box.className = state.selectedId === id ? `${base} selected` : base;
+
+  /* update dot */
+  const dot = box.querySelector('.status-dot');
+  if (dot) dot.className = `status-dot ${status}`;
+
+  /* update badge */
+  const badge = box.querySelector('.node-badge');
+  if (badge && !node.isLeaf) {
+    const leaves = getLeaves(node);
+    const pass   = leaves.filter(l => l.status === 'pass').length;
+    const fail   = leaves.filter(l => l.status === 'fail').length;
+    const total  = leaves.length;
+    badge.textContent = fail ? `${fail}✗ ${pass}✓` : `${pass}/${total}`;
+    badge.className   = `node-badge ${status}`;
+  }
+
+  /* update remark dot visibility for leaves */
+  if (node.isLeaf) {
+    const rdot = box.querySelector('.td-remark-dot');
+    if (rdot) rdot.hidden = !node.remark;
+  }
 }
 
 /* ── 9. Build full tree DOM ───────────────────────────────────────── */
@@ -186,8 +224,65 @@ function buildNodeEl(node) {
 function renderFullTree() {
   const container = el('tree-root');
   container.innerHTML = '';
-  /* render each top-level child of root */
   state.tree.children.forEach(child => container.appendChild(buildNodeEl(child)));
+}
+
+/* ── 10. Build diagram DOM ────────────────────────────────────────── */
+function buildDiagramNode(node) {
+  const li     = document.createElement('li');
+  const status = node.isLeaf ? node.status : aggregateStatus(node);
+
+  /* box */
+  const box = document.createElement('div');
+  box.id          = `tdd-${node.id}`;
+  box.className   = `td-box ${node.isLeaf ? 'td-leaf' : 'td-internal'} ${status}`;
+  box.dataset.nodeId = node.id;
+
+  const dot = document.createElement('span');
+  dot.className = `status-dot ${status}`;
+  box.appendChild(dot);
+
+  const label = document.createElement('span');
+  label.className   = 'td-label';
+  label.textContent = node.label;
+  box.appendChild(label);
+
+  if (!node.isLeaf) {
+    const leaves = getLeaves(node);
+    const pass   = leaves.filter(l => l.status === 'pass').length;
+    const fail   = leaves.filter(l => l.status === 'fail').length;
+    const total  = leaves.length;
+    const badge  = document.createElement('span');
+    badge.className   = `node-badge ${status}`;
+    badge.textContent = fail ? `${fail}✗ ${pass}✓` : `${pass}/${total}`;
+    box.appendChild(badge);
+  } else {
+    /* remark indicator dot — shown when remark non-empty */
+    const rdot = document.createElement('span');
+    rdot.className = 'td-remark-dot';
+    rdot.title     = 'Has remark';
+    rdot.hidden    = !node.remark;
+    box.appendChild(rdot);
+  }
+
+  li.appendChild(box);
+
+  if (!node.isLeaf && node.children.length) {
+    const ul = document.createElement('ul');
+    node.children.forEach(child => ul.appendChild(buildDiagramNode(child)));
+    li.appendChild(ul);
+  }
+
+  return li;
+}
+
+function buildDiagram() {
+  const container = el('tree-diagram');
+  container.innerHTML = '';
+  const ul = document.createElement('ul');
+  ul.className = 'td-tree';
+  state.tree.children.forEach(child => ul.appendChild(buildDiagramNode(child)));
+  container.appendChild(ul);
 }
 
 /* ── 10. Detail panel ─────────────────────────────────────────────── */
@@ -230,11 +325,18 @@ function updateDetail(id) {
 }
 
 function showDetail(id) {
+  const prev = state.selectedId;
   state.selectedId = id;
-  /* deselect previous */
+
+  /* deselect previous in list view */
   $$('.tree-row.selected').forEach(r => r.classList.remove('selected'));
   const row = document.querySelector(`[data-node-id="${id}"]`);
   if (row) row.classList.add('selected');
+
+  /* deselect previous in diagram view */
+  if (prev) renderDiagramNode(prev);
+  renderDiagramNode(id);
+
   updateDetail(id);
 }
 
@@ -347,7 +449,24 @@ function collapseAll() {
   Object.values(state.nodes).filter(n => !n.isLeaf && n.id !== '__root__').forEach(n => setExpanded(n.id, false));
 }
 
-/* ── 16. Init ─────────────────────────────────────────────────────── */
+/* ── 16. View mode ────────────────────────────────────────────────── */
+function setViewMode(mode) {
+  state.viewMode = mode;
+  const isDiagram = mode === 'diagram';
+
+  el('tree-root').hidden    =  isDiagram;
+  el('tree-diagram').hidden = !isDiagram;
+  el('workspace').classList.toggle('diagram-mode', isDiagram);
+
+  el('btn-view-list').classList.toggle('view-active',    !isDiagram);
+  el('btn-view-diagram').classList.toggle('view-active',  isDiagram);
+
+  /* expand/collapse only relevant in list view */
+  el('btn-expand-all').disabled   = isDiagram;
+  el('btn-collapse-all').disabled = isDiagram;
+}
+
+/* ── 17. Init ─────────────────────────────────────────────────────── */
 function init() {
   /* build data */
   const { root, nodes, leaves } = buildTree();
@@ -366,6 +485,7 @@ function init() {
   /* render */
   buildFilterBar();
   renderFullTree();
+  buildDiagram();
   updateSummary();
 
   /* ── Event: tree interactions ───────────────────────────────────── */
@@ -417,6 +537,24 @@ function init() {
   /* ── Toolbar buttons ─────────────────────────────────────────────── */
   el('btn-expand-all').addEventListener('click', expandAll);
   el('btn-collapse-all').addEventListener('click', collapseAll);
+  el('btn-view-list').addEventListener('click',    () => setViewMode('list'));
+  el('btn-view-diagram').addEventListener('click', () => setViewMode('diagram'));
+
+  /* ── Diagram interactions ────────────────────────────────────────── */
+  el('tree-diagram').addEventListener('click', e => {
+    const box = e.target.closest('.td-box');
+    if (!box) return;
+    const id   = box.dataset.nodeId;
+    const node = state.nodes[id];
+    if (node && node.isLeaf) showDetail(id);
+  });
+
+  el('tree-diagram').addEventListener('contextmenu', e => {
+    const box = e.target.closest('.td-box');
+    if (!box) return;
+    e.preventDefault();
+    showCtxMenu(e.clientX, e.clientY, box.dataset.nodeId);
+  });
 
   /* ── Detail panel mark buttons ───────────────────────────────────── */
   el('btn-mark-pass').addEventListener('click',  () => { if (state.selectedId) markNode(state.selectedId, 'pass'); });
@@ -428,7 +566,10 @@ function init() {
   el('remark-input').addEventListener('input', e => {
     if (!state.selectedId) return;
     const node = state.nodes[state.selectedId];
-    if (node) node.remark = e.target.value;
+    if (node) {
+      node.remark = e.target.value;
+      renderDiagramNode(state.selectedId);
+    }
   });
 }
 

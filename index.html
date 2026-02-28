@@ -19,6 +19,11 @@
       <div class="toolbar-actions">
         <button id="btn-expand-all"   class="btn btn-ghost">⊞ Expand</button>
         <button id="btn-collapse-all" class="btn btn-ghost">⊟ Collapse</button>
+        <div class="sep"></div>
+        <div class="view-toggle">
+          <button id="btn-view-list"    class="btn btn-ghost view-btn view-active">☰ List</button>
+          <button id="btn-view-diagram" class="btn btn-ghost view-btn">⊛ Diagram</button>
+        </div>
       </div>
     </header>
 
@@ -28,11 +33,12 @@
     </div>
 
     <!-- ── Main workspace ───────────────────────────────────────────── -->
-    <main class="workspace">
+    <main class="workspace" id="workspace">
 
       <!-- Tree panel -->
       <aside class="tree-panel" id="tree-panel">
         <div id="tree-root"></div>
+        <div id="tree-diagram" class="td-container" hidden></div>
       </aside>
 
       <!-- Detail panel -->
