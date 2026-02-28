@@ -81,6 +81,23 @@ function derivedLeafStatus(leaf) {
   return 'partial';
 }
 
+/* Restore leaf data from old snapshots (used when rebuilding after dimension change).
+   Only restores a result-dimension value when ALL matching old leaves agree. */
+function restoreLeafData(leaf, oldSnapshots) {
+  state.resultDimensions.forEach(r => {
+    const vals = oldSnapshots
+      .map(s => s.results[r.key])
+      .filter(v => v !== undefined);
+    if (vals.length && vals.every(v => v === vals[0])) {
+      leaf.results[r.key] = vals[0];
+    }
+  });
+  const remarks = oldSnapshots.map(s => s.remark).filter(r => r);
+  if (remarks.length && remarks.every(r => r === remarks[0])) {
+    leaf.remark = remarks[0];
+  }
+}
+
 /* Aggregate status for a node (used for box class / badge on internal nodes) */
 function aggregateStatus(node) {
   if (node.isLeaf) return derivedLeafStatus(node);
@@ -594,12 +611,57 @@ function setViewMode(mode) {
 }
 
 /* ── 17. Rebuild (after dimension changes) ─────────────────────────── */
-function rebuildAll() {
+function rebuildAll(oldSnapshots, keyMap) {
   const { root, nodes, leaves } = buildTree();
   state.tree       = root;
   state.nodes      = nodes;
   state.leaves     = leaves;
   state.selectedId = null;
+
+  /* ── attempt to restore leaf data from old snapshots ── */
+  if (oldSnapshots && oldSnapshots.length) {
+    /* convert old signatures to use NEW dimension keys via keyMap */
+    const converted = oldSnapshots.map(snap => {
+      const newSig = {};
+      for (const [oldKey, val] of Object.entries(snap.sig)) {
+        const nk = keyMap[oldKey];
+        if (nk) newSig[nk] = val;          /* dimension still exists (maybe renamed) */
+        /* else: dimension was removed → omit from sig */
+      }
+      return { newSig, results: snap.results, remark: snap.remark };
+    });
+
+    /* index by canonical sig key for exact-match lookup */
+    const exactMap = new Map();           /* sigKey → [snap, …] */
+    converted.forEach(snap => {
+      const key = Object.keys(snap.newSig).sort().map(k => k + '=' + snap.newSig[k]).join('|');
+      if (!exactMap.has(key)) exactMap.set(key, []);
+      exactMap.get(key).push(snap);
+    });
+
+    const newDims = state.dimensions;
+    leaves.forEach(leaf => {
+      const sig = {};
+      newDims.forEach((dim, i) => { sig[dim.key] = leaf.path[i]; });
+      const sigKey = Object.keys(sig).sort().map(k => k + '=' + sig[k]).join('|');
+
+      /* 1. exact match — covers reorder, rename, value add/remove, dim removed */
+      if (exactMap.has(sigKey)) {
+        restoreLeafData(leaf, exactMap.get(sigKey));
+        return;
+      }
+
+      /* 2. subset match — old sig ⊂ new sig (a dimension was added) */
+      const subsets = converted.filter(snap => {
+        const sk = Object.keys(snap.newSig);
+        return sk.length > 0 && sk.length < Object.keys(sig).length
+            && sk.every(k => sig[k] === snap.newSig[k]);
+      });
+      if (subsets.length) {
+        restoreLeafData(leaf, subsets);
+      }
+    });
+  }
 
   /* reset filters — all values active */
   state.activeFilters = {};
@@ -739,17 +801,34 @@ function openDimModal() {
       const hasData = state.leaves.some(l =>
         Object.values(l.results).some(v => v !== 'untested') || l.remark
       );
-      if (hasData && !confirm('Changing dimensions will reset all test results and remarks. Continue?')) return;
+      if (hasData && !confirm('Changing dimensions may affect some test results. Data will be preserved where possible. Continue?')) return;
+
+      /* snapshot old leaf data before overwriting dimensions */
+      const oldDims = state.dimensions;
+      const oldSnapshots = state.leaves.map(leaf => {
+        const sig = {};
+        oldDims.forEach((dim, i) => { sig[dim.key] = leaf.path[i]; });
+        return { sig, results: { ...leaf.results }, remark: leaf.remark };
+      });
+
       /* derive keys from names, ensuring uniqueness */
       const seen = {};
-      state.dimensions = draft.map(d => {
+      const newDimensions = draft.map(d => {
         let key = d.name.trim().toLowerCase().replace(/\s+/g, '_');
         if (seen[key] !== undefined) key += '_' + (++seen[key]);
         else seen[key] = 0;
         return { name: d.name.trim(), key, values: d.values };
       });
+
+      /* build old→new key mapping via the draft's original keys */
+      const keyMap = {};
+      draft.forEach((d, i) => {
+        if (d.key) keyMap[d.key] = newDimensions[i].key;
+      });
+
+      state.dimensions = newDimensions;
       backdrop.remove();
-      rebuildAll(); return;
+      rebuildAll(oldSnapshots, keyMap); return;
     }
     if (e.target === backdrop) { backdrop.remove(); }
   });
