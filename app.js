@@ -107,6 +107,7 @@ function isNodeVisible(node) {
 }
 
 function applyFilters() {
+  /* ── List view ── */
   state.leaves.forEach(leaf => {
     const rowEl = document.querySelector(`[data-node-id="${leaf.id}"]`);
     if (!rowEl) return;
@@ -114,12 +115,25 @@ function applyFilters() {
     if (!nodeEl) return;
     nodeEl.classList.toggle('filtered', !isNodeVisible(leaf));
   });
-  /* show/hide internal nodes that have no visible children */
+  /* hide internal list nodes that have no visible children */
   $$('.tree-node[data-depth]').forEach(nodeEl => {
     const depth = parseInt(nodeEl.dataset.depth, 10);
-    if (depth === DIMENSIONS.length) return;   // leaf
+    if (depth === state.dimensions.length) return;   // leaf
     const hasVisible = !!nodeEl.querySelector('.tree-node:not(.filtered)');
     nodeEl.classList.toggle('filtered', !hasVisible);
+  });
+
+  /* ── Diagram view ── */
+  state.leaves.forEach(leaf => {
+    const li = document.querySelector(`#tree-diagram li[data-node-id="${leaf.id}"]`);
+    if (li) li.classList.toggle('filtered', !isNodeVisible(leaf));
+  });
+  /* hide internal diagram nodes whose every leaf descendant is filtered */
+  $$('#tree-diagram li[data-node-id]').forEach(li => {
+    const node = state.nodes[li.dataset.nodeId];
+    if (!node || node.isLeaf) return;
+    const anyVisible = getLeaves(node).some(l => isNodeVisible(l));
+    li.classList.toggle('filtered', !anyVisible);
   });
 }
 
@@ -231,6 +245,7 @@ function renderFullTree() {
 /* ── 10. Build diagram DOM ────────────────────────────────────────── */
 function buildDiagramNode(node) {
   const li     = document.createElement('li');
+  li.dataset.nodeId = node.id;
   const status = node.isLeaf ? node.status : aggregateStatus(node);
 
   /* box */

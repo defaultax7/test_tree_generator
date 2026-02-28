@@ -619,6 +619,7 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
 
 /* ── Node hidden by filter ─────────────────────────────────────────── */
 .tree-node.filtered { display: none; }
+#tree-diagram li.filtered { display: none; }
 
 /* ── View toggle ───────────────────────────────────────────────────── */
 .view-toggle {
