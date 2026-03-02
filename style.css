@@ -731,14 +731,31 @@ html, body { height: 100%; font-family: var(--font-ui); color: var(--text); back
   background: var(--bg-panel);
   box-shadow: var(--shadow);
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   min-width: 72px;
   cursor: pointer;
   white-space: nowrap;
   font-size: 12px;
   transition: background .15s, border-color .15s, box-shadow .15s;
   user-select: none;
+}
+
+.td-dim-name {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.td-box-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .td-box:hover    { background: var(--bg-hover); box-shadow: var(--shadow-md); }

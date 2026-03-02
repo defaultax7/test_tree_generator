@@ -326,6 +326,16 @@ function buildDiagramNode(node) {
   box.className      = `td-box ${node.isLeaf ? 'td-leaf' : 'td-internal'} ${status}`;
   box.dataset.nodeId = node.id;
 
+  /* dimension name header */
+  const dimName = document.createElement('span');
+  dimName.className   = 'td-dim-name';
+  dimName.textContent = state.dimensions[node.depth - 1].name;
+  box.appendChild(dimName);
+
+  /* body row — dots + label + badge/remark */
+  const body = document.createElement('div');
+  body.className = 'td-box-body';
+
   /* multi-dot group — one dot per result dimension */
   const dotGroup = document.createElement('span');
   dotGroup.className = 'status-dots';
@@ -339,12 +349,12 @@ function buildDiagramNode(node) {
     dot.title            = r.name;
     dotGroup.appendChild(dot);
   });
-  box.appendChild(dotGroup);
+  body.appendChild(dotGroup);
 
   const label = document.createElement('span');
   label.className   = 'td-label';
   label.textContent = node.label;
-  box.appendChild(label);
+  body.appendChild(label);
 
   if (!node.isLeaf) {
     const leaves = getLeaves(node);
@@ -354,15 +364,17 @@ function buildDiagramNode(node) {
     const badge  = document.createElement('span');
     badge.className   = `node-badge ${status}`;
     badge.textContent = fail ? `${fail}✗ ${pass}✓` : `${pass}/${total}`;
-    box.appendChild(badge);
+    body.appendChild(badge);
   } else {
     /* remark indicator dot */
     const rdot = document.createElement('span');
     rdot.className = 'td-remark-dot';
     rdot.title     = 'Has remark';
     rdot.hidden    = !node.remark;
-    box.appendChild(rdot);
+    body.appendChild(rdot);
   }
+
+  box.appendChild(body);
 
   li.appendChild(box);
 
