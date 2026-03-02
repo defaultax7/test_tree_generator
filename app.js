@@ -955,7 +955,117 @@ function openResultDimModal() {
   });
 }
 
-/* ── 20. Excel export ──────────────────────────────────────────────── */
+/* ── 20. Excel import ──────────────────────────────────────────────── */
+function importExcel() {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert('xlsx-js-style not loaded.'); return; }
+  const input = el('import-file-input');
+  input.value = '';
+  input.click();
+}
+
+function handleImportFile(file) {
+  const XLSX = window.XLSX;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets['List'];
+      if (!ws) { alert('Invalid file: "List" sheet not found.'); return; }
+
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if (rows.length < 2) { alert('No data found in the List sheet.'); return; }
+
+      const headers  = rows[0].map(h => String(h).trim());
+      const dataRows = rows.slice(1).filter(r => r.some(c => c !== ''));
+
+      const remarkIdx = headers.indexOf('Remark');
+      const RESULT_SUFFIX = ' Status';
+
+      const dimHeaders    = [];
+      const resultHeaders = [];
+      headers.forEach((h, i) => {
+        if (i === remarkIdx) return;
+        if (h.endsWith(RESULT_SUFFIX))
+          resultHeaders.push({ name: h.slice(0, -RESULT_SUFFIX.length).trim(), idx: i });
+        else
+          dimHeaders.push({ name: h, idx: i });
+      });
+
+      if (!dimHeaders.length)    { alert('No dimension columns found in the file.'); return; }
+      if (!resultHeaders.length) { alert('No result-dimension columns found in the file.'); return; }
+
+      /* generate unique keys — same algorithm as the dimension modal */
+      function makeKeys(items) {
+        const seen = {};
+        return items.map(item => {
+          let key = item.name.trim().toLowerCase().replace(/\s+/g, '_');
+          if (seen[key] !== undefined) key += '_' + (++seen[key]);
+          else seen[key] = 0;
+          return key;
+        });
+      }
+
+      /* collect unique values per dimension column (insertion order) */
+      const dimValueSets = dimHeaders.map(() => []);
+      dataRows.forEach(row => {
+        dimHeaders.forEach((dh, i) => {
+          const val = String(row[dh.idx] ?? '').trim();
+          if (val && !dimValueSets[i].includes(val)) dimValueSets[i].push(val);
+        });
+      });
+
+      const dimKeys = makeKeys(dimHeaders);
+      const newDimensions = dimHeaders.map((dh, i) => ({
+        name:   dh.name,
+        key:    dimKeys[i],
+        values: dimValueSets[i],
+      }));
+
+      if (newDimensions.some(d => !d.values.length)) {
+        alert('One or more dimensions have no values.'); return;
+      }
+
+      const resultKeys = makeKeys(resultHeaders);
+      const newResultDimensions = resultHeaders.map((rh, i) => ({
+        name: rh.name,
+        key:  resultKeys[i],
+      }));
+
+      /* build snapshots from data rows */
+      const validStatuses = new Set(['pass', 'fail', 'untested', 'skipped', 'running']);
+      const snapshots = dataRows.map(row => {
+        const sig = {};
+        dimHeaders.forEach((dh, i) => {
+          sig[dimKeys[i]] = String(row[dh.idx] ?? '').trim();
+        });
+        const results = {};
+        resultHeaders.forEach((rh, i) => {
+          const raw = String(row[rh.idx] ?? '').trim().toLowerCase();
+          results[resultKeys[i]] = validStatuses.has(raw) ? raw : 'untested';
+        });
+        const remark = remarkIdx >= 0 ? String(row[remarkIdx] ?? '').trim() : '';
+        return { sig, results, remark };
+      });
+
+      /* apply new config + rebuild */
+      state.dimensions       = newDimensions;
+      state.resultDimensions = newResultDimensions;
+
+      /* identity keyMap so rebuildAll can find exact-match snapshots */
+      const identityMap = {};
+      dimKeys.forEach(k => { identityMap[k] = k; });
+
+      rebuildAll(snapshots, identityMap);
+
+    } catch (err) {
+      alert('Failed to read file: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/* ── 21. Excel export ──────────────────────────────────────────────── */
 function exportExcel() {
   const XLSX = window.XLSX;
   if (!XLSX) { alert('xlsx-js-style not loaded.'); return; }
@@ -1146,6 +1256,11 @@ function init() {
   el('btn-edit-dims').addEventListener('click', openDimModal);
   el('btn-edit-result-dims').addEventListener('click', openResultDimModal);
   el('btn-export').addEventListener('click', exportExcel);
+  el('btn-import').addEventListener('click', importExcel);
+  el('import-file-input').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (file) handleImportFile(file);
+  });
 
   /* ── Diagram interactions ────────────────────────────────────────── */
   el('tree-diagram').addEventListener('click', e => {
